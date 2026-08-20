@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+
+# Minecraft development runtime
+run/
+logs/
+crash-reports/
+
+# macOS
+.DS_Store
+
+# Misc
+*.log

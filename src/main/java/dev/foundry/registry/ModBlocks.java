@@ -1,6 +1,7 @@
 package dev.foundry.registry;
 
 import dev.foundry.Foundry;
+import dev.foundry.block.FreightDepotBlock;
 import dev.foundry.block.TownHallBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -17,6 +18,11 @@ public final class ModBlocks {
     public static final RegistryObject<Block> TOWN_HALL = BLOCKS.register(
             "town_hall",
             () -> new TownHallBlock(BlockBehaviour.Properties.copy(Blocks.STONE_BRICKS))
+    );
+
+    public static final RegistryObject<Block> FREIGHT_DEPOT = BLOCKS.register(
+            "freight_depot",
+            () -> new FreightDepotBlock(BlockBehaviour.Properties.copy(Blocks.COPPER_BLOCK))
     );
 
     private ModBlocks() {

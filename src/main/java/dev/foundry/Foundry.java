@@ -23,6 +23,7 @@ public final class Foundry {
     private void addCreativeTabContents(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             event.accept(ModItems.TOWN_HALL.get());
+            event.accept(ModItems.FREIGHT_DEPOT.get());
         }
     }
 }

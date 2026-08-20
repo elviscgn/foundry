@@ -86,7 +86,15 @@ public final class Settlement {
     }
 
     public boolean matches(ResourceKey<Level> dimension, BlockPos pos) {
-        return this.dimension.equals(dimension.location().toString()) && this.townHallPos == pos.asLong();
+        return isInDimension(dimension) && this.townHallPos == pos.asLong();
+    }
+
+    public boolean isInDimension(ResourceKey<Level> dimension) {
+        return this.dimension.equals(dimension.location().toString());
+    }
+
+    public double distanceToSqr(BlockPos pos) {
+        return BlockPos.of(townHallPos).distSqr(pos);
     }
 
     public String locationKey() {
@@ -97,7 +105,7 @@ public final class Settlement {
         return locationKey(dimension.location().toString(), pos.asLong());
     }
 
-    private static String locationKey(String dimension, long pos) {
+    public static String locationKey(String dimension, long pos) {
         return dimension + "@" + pos;
     }
 

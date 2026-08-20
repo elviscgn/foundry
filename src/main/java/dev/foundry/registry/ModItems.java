@@ -17,6 +17,11 @@ public final class ModItems {
             () -> new BlockItem(ModBlocks.TOWN_HALL.get(), new Item.Properties())
     );
 
+    public static final RegistryObject<Item> FREIGHT_DEPOT = ITEMS.register(
+            "freight_depot",
+            () -> new BlockItem(ModBlocks.FREIGHT_DEPOT.get(), new Item.Properties())
+    );
+
     private ModItems() {
     }
 

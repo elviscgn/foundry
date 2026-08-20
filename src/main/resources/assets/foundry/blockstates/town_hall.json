@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "foundry:block/town_hall"
+    }
+  }
+}

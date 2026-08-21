@@ -34,74 +34,84 @@ public final class SettlementScreen extends Screen {
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(guiGraphics);
 
-        int panelWidth = Math.min(600, width - 20);
-        int panelHeight = Math.min(340, height - 20);
+        int panelWidth = Math.min(620, Math.max(1, width - 20));
+        int panelHeight = Math.min(350, Math.max(1, height - 20));
         int panelX = (width - panelWidth) / 2;
         int panelY = (height - panelHeight) / 2;
-        int padding = 14;
+        int padding = panelWidth < 420 ? 10 : 14;
         int innerX = panelX + padding;
-        int innerWidth = panelWidth - padding * 2;
+        int innerWidth = Math.max(1, panelWidth - padding * 2);
 
         guiGraphics.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, PANEL_BORDER);
         guiGraphics.fill(panelX + 1, panelY + 1, panelX + panelWidth - 1, panelY + panelHeight - 1, PANEL_BG);
 
         int titleY = panelY + 12;
-        guiGraphics.drawString(font, Component.literal("FOUNDRY // TOWN HALL LEDGER"), innerX, titleY, GOLD);
+        String title = innerWidth < 300 ? "FOUNDRY // LEDGER" : "FOUNDRY // TOWN HALL LEDGER";
+        guiGraphics.drawString(font, Component.literal(title), innerX, titleY, GOLD);
 
         String supplyState = snapshot.breadSupplied() >= snapshot.breadTarget() ? "SUPPLIED" : "SHORTAGE";
         int supplyColor = snapshot.breadSupplied() >= snapshot.breadTarget() ? GREEN : RED;
-        guiGraphics.drawString(font, Component.literal(supplyState),
-                panelX + panelWidth - padding - font.width(supplyState), titleY, supplyColor);
-
-        int statsY = panelY + 31;
-        boolean compactStats = innerWidth < 430;
-        if (compactStats) {
-            String population = "Population  " + snapshot.population();
-            String prosperity = "Prosperity  " + snapshot.prosperity();
-            guiGraphics.drawString(font, Component.literal(population), innerX, statsY, TEXT);
-            guiGraphics.drawString(font, Component.literal(prosperity),
-                    innerX + innerWidth - font.width(prosperity), statsY, TEXT);
-
-            String bread = "Bread  " + snapshot.breadSupplied() + "/" + snapshot.breadTarget()
-                    + "   -" + snapshot.dailyBreadConsumption() + "/day";
-            guiGraphics.drawString(font, Component.literal(bread), innerX, statsY + 14, TEXT);
-        } else {
-            String population = "Population  " + snapshot.population();
-            String prosperity = "Prosperity  " + snapshot.prosperity();
-            String bread = "Bread  " + snapshot.breadSupplied() + "/" + snapshot.breadTarget()
-                    + "   -" + snapshot.dailyBreadConsumption() + "/day";
-
-            guiGraphics.drawString(font, Component.literal(population), innerX, statsY, TEXT);
-            guiGraphics.drawCenteredString(font, Component.literal(prosperity),
-                    innerX + innerWidth / 2, statsY, TEXT);
-            guiGraphics.drawString(font, Component.literal(bread),
-                    innerX + innerWidth - font.width(bread), statsY, TEXT);
+        int supplyX = panelX + panelWidth - padding - font.width(supplyState);
+        if (supplyX > innerX + font.width(title) + 8) {
+            guiGraphics.drawString(font, Component.literal(supplyState), supplyX, titleY, supplyColor);
         }
 
+        int statsY = panelY + 31;
+        boolean compactStats = innerWidth < 470;
+        drawStats(guiGraphics, innerX, innerWidth, statsY, compactStats);
+
         int contentTop = statsY + (compactStats ? 34 : 22);
-        int contentBottom = panelY + panelHeight - 14;
+        int contentBottom = panelY + panelHeight - padding;
         int availableHeight = Math.max(1, contentBottom - contentTop);
 
-        int miniGraphHeight = Math.min(62, Math.max(30, (availableHeight - 24) / 3));
-        int miniGraphY = contentBottom - miniGraphHeight;
-        int miniLabelY = miniGraphY - 11;
-
+        boolean showTrendPanels = availableHeight >= 150 && innerWidth >= 280;
         int breadLabelY = contentTop;
         int breadGraphY = breadLabelY + 12;
-        int breadGraphBottom = miniLabelY - 12;
-        int breadGraphHeight = Math.max(20, breadGraphBottom - breadGraphY);
 
-        drawBreadHeader(guiGraphics, innerX, breadLabelY, innerWidth);
-        drawBreadGraph(guiGraphics, snapshot.history(), innerX, breadGraphY, innerWidth, breadGraphHeight);
+        if (showTrendPanels) {
+            int trendGraphHeight = clamp((availableHeight - 42) / 3, 42, 62);
+            int trendGraphY = contentBottom - trendGraphHeight;
+            int trendLabelY = trendGraphY - 11;
+            int breadGraphBottom = trendLabelY - 10;
+            int breadGraphHeight = Math.max(36, breadGraphBottom - breadGraphY);
 
-        int miniGap = 12;
-        int miniWidth = (innerWidth - miniGap) / 2;
-        drawTrendGraph(guiGraphics, snapshot.history(), innerX, miniLabelY, miniGraphY, miniWidth, miniGraphHeight,
-                "PROSPERITY", HistoryPointSnapshot::prosperity, GOLD);
-        drawTrendGraph(guiGraphics, snapshot.history(), innerX + miniWidth + miniGap, miniLabelY, miniGraphY,
-                miniWidth, miniGraphHeight, "POPULATION", HistoryPointSnapshot::population, STEEL);
+            drawBreadHeader(guiGraphics, innerX, breadLabelY, innerWidth);
+            drawBreadGraph(guiGraphics, snapshot.history(), innerX, breadGraphY, innerWidth, breadGraphHeight);
+
+            int miniGap = 12;
+            int miniWidth = (innerWidth - miniGap) / 2;
+            drawTrendGraph(guiGraphics, snapshot.history(), innerX, trendLabelY, trendGraphY,
+                    miniWidth, trendGraphHeight, "PROSPERITY", HistoryPointSnapshot::prosperity, GOLD);
+            drawTrendGraph(guiGraphics, snapshot.history(), innerX + miniWidth + miniGap, trendLabelY, trendGraphY,
+                    miniWidth, trendGraphHeight, "POPULATION", HistoryPointSnapshot::population, STEEL);
+        } else {
+            int breadGraphHeight = Math.max(24, contentBottom - breadGraphY);
+            drawBreadHeader(guiGraphics, innerX, breadLabelY, innerWidth);
+            drawBreadGraph(guiGraphics, snapshot.history(), innerX, breadGraphY, innerWidth, breadGraphHeight);
+        }
 
         super.render(guiGraphics, mouseX, mouseY, partialTick);
+    }
+
+    private void drawStats(GuiGraphics guiGraphics, int x, int width, int y, boolean compact) {
+        String population = "Population  " + snapshot.population();
+        String prosperity = "Prosperity  " + snapshot.prosperity();
+        String bread = "Bread  " + snapshot.breadSupplied() + "/" + snapshot.breadTarget()
+                + "   -" + snapshot.dailyBreadConsumption() + "/day";
+
+        if (compact) {
+            guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
+            int prosperityX = x + width - font.width(prosperity);
+            if (prosperityX > x + font.width(population) + 8) {
+                guiGraphics.drawString(font, Component.literal(prosperity), prosperityX, y, TEXT);
+            }
+            guiGraphics.drawString(font, Component.literal(bread), x, y + 14, TEXT);
+            return;
+        }
+
+        guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
+        guiGraphics.drawCenteredString(font, Component.literal(prosperity), x + width / 2, y, TEXT);
+        guiGraphics.drawString(font, Component.literal(bread), x + width - font.width(bread), y, TEXT);
     }
 
     private void drawBreadHeader(GuiGraphics guiGraphics, int x, int y, int width) {
@@ -118,20 +128,26 @@ public final class SettlementScreen extends Screen {
         guiGraphics.fill(x, y, x + width, y + height, GRAPH_BG);
 
         if (history.isEmpty()) {
-            guiGraphics.drawCenteredString(font, Component.literal("History starts after the first economy tick"),
-                    x + width / 2, y + height / 2 - 4, MUTED_TEXT);
+            String empty = "History starts after the first economy tick";
+            if (font.width(empty) + 16 <= width && height >= 20) {
+                guiGraphics.drawCenteredString(font, Component.literal(empty),
+                        x + width / 2, y + height / 2 - 4, MUTED_TEXT);
+            }
             return;
         }
 
         int innerX = x + 8;
         int innerY = y + 6;
         int innerWidth = Math.max(1, width - 16);
-        int footerHeight = 12;
+        int footerHeight = height >= 34 ? 12 : 0;
         int plotBottom = y + height - footerHeight;
         int innerHeight = Math.max(1, plotBottom - innerY - 2);
-        int count = history.size();
-        int gap = 1;
-        int barWidth = Math.max(2, (innerWidth - Math.max(0, count - 1) * gap) / Math.max(1, count));
+
+        int count = Math.min(history.size(), innerWidth);
+        int firstVisible = history.size() - count;
+        int gap = innerWidth >= count * 3 ? 1 : 0;
+        int barWidth = Math.max(1,
+                (innerWidth - Math.max(0, count - 1) * gap) / Math.max(1, count));
         int usedWidth = count * barWidth + Math.max(0, count - 1) * gap;
         int startX = innerX + Math.max(0, innerWidth - usedWidth);
 
@@ -147,23 +163,28 @@ public final class SettlementScreen extends Screen {
         guiGraphics.fill(innerX, targetY, innerX + innerWidth, targetY + 1, PANEL_BORDER);
 
         for (int i = 0; i < count; i++) {
-            HistoryPointSnapshot point = history.get(i);
+            HistoryPointSnapshot point = history.get(firstVisible + i);
             int barHeight = point.breadSupplied() <= 0
                     ? 1
                     : Math.max(1, point.breadSupplied() * innerHeight / scaleMax);
             int barX = startX + i * (barWidth + gap);
             int barY = innerY + innerHeight - barHeight;
             int color = point.breadSupplied() >= point.breadTarget() ? GREEN : RED;
-            guiGraphics.fill(barX, barY, barX + barWidth, innerY + innerHeight, color);
+            guiGraphics.fill(barX, barY, Math.min(innerX + innerWidth, barX + barWidth), innerY + innerHeight, color);
         }
 
-        HistoryPointSnapshot first = history.get(0);
-        HistoryPointSnapshot last = history.get(history.size() - 1);
-        int footerY = y + height - 9;
-        guiGraphics.drawString(font, Component.literal("Day " + first.day()), innerX, footerY, MUTED_TEXT);
-        String lastDay = "Day " + last.day();
-        guiGraphics.drawString(font, Component.literal(lastDay),
-                innerX + innerWidth - font.width(lastDay), footerY, MUTED_TEXT);
+        if (footerHeight > 0) {
+            HistoryPointSnapshot first = history.get(firstVisible);
+            HistoryPointSnapshot last = history.get(history.size() - 1);
+            int footerY = y + height - 9;
+            String firstDay = "Day " + first.day();
+            String lastDay = "Day " + last.day();
+            guiGraphics.drawString(font, Component.literal(firstDay), innerX, footerY, MUTED_TEXT);
+            if (font.width(firstDay) + font.width(lastDay) + 12 < innerWidth) {
+                guiGraphics.drawString(font, Component.literal(lastDay),
+                        innerX + innerWidth - font.width(lastDay), footerY, MUTED_TEXT);
+            }
+        }
     }
 
     private void drawTrendGraph(GuiGraphics guiGraphics, List<HistoryPointSnapshot> history,
@@ -171,10 +192,13 @@ public final class SettlementScreen extends Screen {
                                 ToIntFunction<HistoryPointSnapshot> valueGetter, int color) {
         int min = history.stream().mapToInt(valueGetter).min().orElse(0);
         int max = history.stream().mapToInt(valueGetter).max().orElse(min);
-        String range = history.isEmpty() ? "--" : (min == max ? Integer.toString(max) : min + "-" + max);
+        int current = history.isEmpty() ? 0 : valueGetter.applyAsInt(history.get(history.size() - 1));
+        String value = history.isEmpty() ? "--" : Integer.toString(current);
 
         guiGraphics.drawString(font, Component.literal(label), x, labelY, MUTED_TEXT);
-        guiGraphics.drawString(font, Component.literal(range), x + width - font.width(range), labelY, MUTED_TEXT);
+        if (font.width(label) + font.width(value) + 10 < width) {
+            guiGraphics.drawString(font, Component.literal(value), x + width - font.width(value), labelY, TEXT);
+        }
         guiGraphics.fill(x, graphY, x + width, graphY + height, GRAPH_BG);
 
         if (history.isEmpty()) {
@@ -185,18 +209,19 @@ public final class SettlementScreen extends Screen {
         int innerY = graphY + 6;
         int innerWidth = Math.max(2, width - 12);
         int innerHeight = Math.max(2, height - 12);
-        int count = history.size();
+        int count = Math.min(history.size(), innerWidth);
+        int firstVisible = history.size() - count;
 
         int previousX = -1;
         int previousY = -1;
         for (int i = 0; i < count; i++) {
-            int value = valueGetter.applyAsInt(history.get(i));
+            int valueAtPoint = valueGetter.applyAsInt(history.get(firstVisible + i));
             int pointX = count == 1
                     ? innerX + innerWidth / 2
                     : innerX + i * (innerWidth - 1) / (count - 1);
             int pointY = max == min
                     ? innerY + innerHeight / 2
-                    : innerY + innerHeight - 1 - (value - min) * (innerHeight - 1) / (max - min);
+                    : innerY + innerHeight - 1 - (valueAtPoint - min) * (innerHeight - 1) / (max - min);
 
             if (previousX >= 0) {
                 drawLine(guiGraphics, previousX, previousY, pointX, pointY, color);
@@ -205,6 +230,10 @@ public final class SettlementScreen extends Screen {
             previousX = pointX;
             previousY = pointY;
         }
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private static void drawLine(GuiGraphics guiGraphics, int x0, int y0, int x1, int y1, int color) {

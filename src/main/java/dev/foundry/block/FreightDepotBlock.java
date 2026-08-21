@@ -71,16 +71,24 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         }
 
         ItemStack heldStack = player.getItemInHand(hand);
-        if (heldStack.is(Items.BREAD) && !settlement.isSupplied()) {
-            int accepted = settlement.deliverBread(heldStack.getCount());
-            if (accepted > 0) {
-                if (!player.getAbilities().instabuild) {
-                    heldStack.shrink(accepted);
-                }
-                savedData.setDirty();
-                player.displayClientMessage(deliveryMessage(settlement, accepted), false);
-                return InteractionResult.CONSUME;
+        int accepted = 0;
+        String commodity = null;
+
+        if (heldStack.is(Items.BREAD)) {
+            accepted = settlement.deliverBread(heldStack.getCount());
+            commodity = "bread";
+        } else if (heldStack.is(Items.BRICK)) {
+            accepted = settlement.deliverBuildingMaterials(heldStack.getCount());
+            commodity = "bricks";
+        }
+
+        if (accepted > 0 && commodity != null) {
+            if (!player.getAbilities().instabuild) {
+                heldStack.shrink(accepted);
             }
+            savedData.setDirty();
+            player.displayClientMessage(deliveryMessage(settlement, accepted, commodity), false);
+            return InteractionResult.CONSUME;
         }
 
         player.displayClientMessage(statusMessage(settlement), false);
@@ -95,26 +103,26 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         super.onRemove(state, level, pos, newState, isMoving);
     }
 
-    private static Component deliveryMessage(Settlement settlement, int accepted) {
-        String supplyState = settlement.isSupplied() ? "SUPPLIED" : "NEEDS BREAD";
-        ChatFormatting stateColor = settlement.isSupplied() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
-
-        return Component.literal("Freight Depot | Accepted " + accepted + " bread | ")
+    private static Component deliveryMessage(Settlement settlement, int accepted, String commodity) {
+        return Component.literal("Freight Depot | Accepted " + accepted + " " + commodity + " | ")
                 .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget() + " | "))
-                .append(Component.literal(supplyState).withStyle(stateColor))
-                .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
+                .append(Component.literal("Bread " + settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
+                .append(Component.literal(" | Bricks " + settlement.getBuildingMaterialsSupplied()
+                        + "/" + settlement.getBuildingMaterialsTarget()).withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }
 
     private static Component statusMessage(Settlement settlement) {
-        String supplyState = settlement.isSupplied() ? "SUPPLIED" : "NEEDS BREAD";
-        ChatFormatting stateColor = settlement.isSupplied() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
+        String growthState = settlement.isGrowthReady() ? "GROWTH READY" : "STABLE";
+        ChatFormatting growthColor = settlement.isGrowthReady() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
 
-        return Component.literal("Freight Depot | Linked | Bread: ")
+        return Component.literal("Freight Depot | Linked | Bread ")
                 .withStyle(ChatFormatting.GOLD)
                 .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
                 .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(" | " + supplyState).withStyle(stateColor))
-                .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
+                .append(Component.literal(" | Bricks " + settlement.getBuildingMaterialsSupplied()
+                        + "/" + settlement.getBuildingMaterialsTarget()).withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(" | " + growthState).withStyle(growthColor))
+                .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }
 }

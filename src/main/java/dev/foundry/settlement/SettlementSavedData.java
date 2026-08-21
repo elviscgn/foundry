@@ -164,14 +164,14 @@ public final class SettlementSavedData extends SavedData {
         long skippedDays = Math.max(0L, daysElapsed - Settlement.HISTORY_LIMIT);
         if (skippedDays > 0L) {
             for (Settlement settlement : settlementsById.values()) {
-                settlement.consumeBreadForDays(skippedDays);
+                settlement.advanceEconomyForDays(skippedDays);
             }
         }
 
         long firstRecordedDay = lastProcessedDay + skippedDays + 1L;
         for (long day = firstRecordedDay; day <= currentDay; day++) {
             for (Settlement settlement : settlementsById.values()) {
-                settlement.consumeBreadForDays(1L);
+                settlement.advanceEconomyForDay();
                 settlement.recordHistory(day);
             }
         }

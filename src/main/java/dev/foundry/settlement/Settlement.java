@@ -15,14 +15,18 @@ import java.util.UUID;
 public final class Settlement {
     public static final int DEFAULT_POPULATION = 120;
     public static final int HISTORY_LIMIT = 30;
+    public static final int GROWTH_PROSPERITY_THRESHOLD = 3;
     private static final int BASE_BREAD_TARGET = 64;
     private static final int BASE_DAILY_BREAD_CONSUMPTION = 16;
+    private static final int BASE_BUILDING_MATERIAL_TARGET = 32;
+    private static final int BASE_GROWTH_MATERIAL_COST = 8;
 
     private static final String TAG_ID = "Id";
     private static final String TAG_DIMENSION = "Dimension";
     private static final String TAG_TOWN_HALL_POS = "TownHallPos";
     private static final String TAG_POPULATION = "Population";
     private static final String TAG_BREAD_SUPPLIED = "BreadSupplied";
+    private static final String TAG_BUILDING_MATERIALS_SUPPLIED = "BuildingMaterialsSupplied";
     private static final String TAG_PROSPERITY = "Prosperity";
     private static final String TAG_HISTORY = "History";
 
@@ -32,15 +36,17 @@ public final class Settlement {
     private final List<HistoryPoint> history;
     private int population;
     private int breadSupplied;
+    private int buildingMaterialsSupplied;
     private int prosperity;
 
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
-                       int prosperity, List<HistoryPoint> history) {
+                       int buildingMaterialsSupplied, int prosperity, List<HistoryPoint> history) {
         this.id = id;
         this.dimension = dimension;
         this.townHallPos = townHallPos;
         this.population = population;
         this.breadSupplied = breadSupplied;
+        this.buildingMaterialsSupplied = buildingMaterialsSupplied;
         this.prosperity = prosperity;
         this.history = new ArrayList<>(history);
         trimHistory();
@@ -52,6 +58,7 @@ public final class Settlement {
                 dimension.location().toString(),
                 townHallPos.asLong(),
                 DEFAULT_POPULATION,
+                0,
                 0,
                 0,
                 List.of()
@@ -71,6 +78,7 @@ public final class Settlement {
                 tag.getLong(TAG_TOWN_HALL_POS),
                 tag.getInt(TAG_POPULATION),
                 tag.getInt(TAG_BREAD_SUPPLIED),
+                tag.getInt(TAG_BUILDING_MATERIALS_SUPPLIED),
                 tag.getInt(TAG_PROSPERITY),
                 history
         );
@@ -83,6 +91,7 @@ public final class Settlement {
         tag.putLong(TAG_TOWN_HALL_POS, townHallPos);
         tag.putInt(TAG_POPULATION, population);
         tag.putInt(TAG_BREAD_SUPPLIED, breadSupplied);
+        tag.putInt(TAG_BUILDING_MATERIALS_SUPPLIED, buildingMaterialsSupplied);
         tag.putInt(TAG_PROSPERITY, prosperity);
 
         ListTag historyTag = new ListTag();
@@ -107,6 +116,16 @@ public final class Settlement {
         return accepted;
     }
 
+    public int deliverBuildingMaterials(int offered) {
+        int accepted = Math.min(Math.max(offered, 0), getBuildingMaterialsTarget() - buildingMaterialsSupplied);
+        if (accepted <= 0) {
+            return 0;
+        }
+
+        buildingMaterialsSupplied += accepted;
+        return accepted;
+    }
+
     public boolean consumeBreadForDays(long daysElapsed) {
         if (daysElapsed <= 0 || breadSupplied <= 0) {
             return false;
@@ -122,12 +141,41 @@ public final class Settlement {
         return true;
     }
 
+    public boolean advanceEconomyForDay() {
+        boolean grew = tryGrowPopulation();
+        consumeBreadForDays(1L);
+        return grew;
+    }
+
+    public void advanceEconomyForDays(long daysElapsed) {
+        if (daysElapsed <= 0) {
+            return;
+        }
+
+        advanceEconomyForDay();
+        if (daysElapsed > 1L) {
+            consumeBreadForDays(daysElapsed - 1L);
+        }
+    }
+
+    private boolean tryGrowPopulation() {
+        if (!isGrowthReady()) {
+            return false;
+        }
+
+        buildingMaterialsSupplied = Math.max(0, buildingMaterialsSupplied - getGrowthMaterialCost());
+        population += getDailyGrowthAmount();
+        return true;
+    }
+
     public void recordHistory(long day) {
         HistoryPoint point = new HistoryPoint(
                 day,
                 population,
                 breadSupplied,
                 getBreadTarget(),
+                buildingMaterialsSupplied,
+                getBuildingMaterialsTarget(),
                 prosperity
         );
 
@@ -153,6 +201,18 @@ public final class Settlement {
         return scaledForPopulation(BASE_DAILY_BREAD_CONSUMPTION);
     }
 
+    public int getBuildingMaterialsTarget() {
+        return scaledForPopulation(BASE_BUILDING_MATERIAL_TARGET);
+    }
+
+    public int getGrowthMaterialCost() {
+        return scaledForPopulation(BASE_GROWTH_MATERIAL_COST);
+    }
+
+    public int getDailyGrowthAmount() {
+        return Math.max(1, (population + 59) / 60);
+    }
+
     private int scaledForPopulation(int baseAmount) {
         long scaled = ((long) Math.max(population, 1) * baseAmount + DEFAULT_POPULATION - 1L)
                 / DEFAULT_POPULATION;
@@ -161,6 +221,16 @@ public final class Settlement {
 
     public boolean isSupplied() {
         return breadSupplied >= getBreadTarget();
+    }
+
+    public boolean hasBuildingMaterials() {
+        return buildingMaterialsSupplied >= getBuildingMaterialsTarget();
+    }
+
+    public boolean isGrowthReady() {
+        return isSupplied()
+                && hasBuildingMaterials()
+                && prosperity >= GROWTH_PROSPERITY_THRESHOLD;
     }
 
     public boolean matches(ResourceKey<Level> dimension, BlockPos pos) {
@@ -199,6 +269,10 @@ public final class Settlement {
         return breadSupplied;
     }
 
+    public int getBuildingMaterialsSupplied() {
+        return buildingMaterialsSupplied;
+    }
+
     public int getProsperity() {
         return prosperity;
     }
@@ -207,11 +281,21 @@ public final class Settlement {
         return Collections.unmodifiableList(history);
     }
 
-    public record HistoryPoint(long day, int population, int breadSupplied, int breadTarget, int prosperity) {
+    public record HistoryPoint(
+            long day,
+            int population,
+            int breadSupplied,
+            int breadTarget,
+            int buildingMaterialsSupplied,
+            int buildingMaterialsTarget,
+            int prosperity
+    ) {
         private static final String TAG_DAY = "Day";
         private static final String TAG_POPULATION = "Population";
         private static final String TAG_BREAD_SUPPLIED = "BreadSupplied";
         private static final String TAG_BREAD_TARGET = "BreadTarget";
+        private static final String TAG_BUILDING_MATERIALS_SUPPLIED = "BuildingMaterialsSupplied";
+        private static final String TAG_BUILDING_MATERIALS_TARGET = "BuildingMaterialsTarget";
         private static final String TAG_PROSPERITY = "Prosperity";
 
         static HistoryPoint load(CompoundTag tag) {
@@ -220,6 +304,8 @@ public final class Settlement {
                     tag.getInt(TAG_POPULATION),
                     tag.getInt(TAG_BREAD_SUPPLIED),
                     tag.getInt(TAG_BREAD_TARGET),
+                    tag.getInt(TAG_BUILDING_MATERIALS_SUPPLIED),
+                    tag.getInt(TAG_BUILDING_MATERIALS_TARGET),
                     tag.getInt(TAG_PROSPERITY)
             );
         }
@@ -230,6 +316,8 @@ public final class Settlement {
             tag.putInt(TAG_POPULATION, population);
             tag.putInt(TAG_BREAD_SUPPLIED, breadSupplied);
             tag.putInt(TAG_BREAD_TARGET, breadTarget);
+            tag.putInt(TAG_BUILDING_MATERIALS_SUPPLIED, buildingMaterialsSupplied);
+            tag.putInt(TAG_BUILDING_MATERIALS_TARGET, buildingMaterialsTarget);
             tag.putInt(TAG_PROSPERITY, prosperity);
             return tag;
         }

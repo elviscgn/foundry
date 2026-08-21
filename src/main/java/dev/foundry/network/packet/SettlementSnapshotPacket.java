@@ -16,7 +16,12 @@ public record SettlementSnapshotPacket(
         int breadSupplied,
         int breadTarget,
         int dailyBreadConsumption,
+        int buildingMaterialsSupplied,
+        int buildingMaterialsTarget,
+        int growthMaterialCost,
+        int dailyGrowthAmount,
         int prosperity,
+        boolean growthReady,
         List<HistoryPointSnapshot> history
 ) {
     public static SettlementSnapshotPacket from(Settlement settlement) {
@@ -26,6 +31,8 @@ public record SettlementSnapshotPacket(
                         point.population(),
                         point.breadSupplied(),
                         point.breadTarget(),
+                        point.buildingMaterialsSupplied(),
+                        point.buildingMaterialsTarget(),
                         point.prosperity()
                 ))
                 .toList();
@@ -35,7 +42,12 @@ public record SettlementSnapshotPacket(
                 settlement.getBreadSupplied(),
                 settlement.getBreadTarget(),
                 settlement.getDailyBreadConsumption(),
+                settlement.getBuildingMaterialsSupplied(),
+                settlement.getBuildingMaterialsTarget(),
+                settlement.getGrowthMaterialCost(),
+                settlement.getDailyGrowthAmount(),
                 settlement.getProsperity(),
+                settlement.isGrowthReady(),
                 history
         );
     }
@@ -45,7 +57,12 @@ public record SettlementSnapshotPacket(
         buffer.writeVarInt(packet.breadSupplied);
         buffer.writeVarInt(packet.breadTarget);
         buffer.writeVarInt(packet.dailyBreadConsumption);
+        buffer.writeVarInt(packet.buildingMaterialsSupplied);
+        buffer.writeVarInt(packet.buildingMaterialsTarget);
+        buffer.writeVarInt(packet.growthMaterialCost);
+        buffer.writeVarInt(packet.dailyGrowthAmount);
         buffer.writeVarInt(packet.prosperity);
+        buffer.writeBoolean(packet.growthReady);
         buffer.writeVarInt(packet.history.size());
 
         for (HistoryPointSnapshot point : packet.history) {
@@ -53,6 +70,8 @@ public record SettlementSnapshotPacket(
             buffer.writeVarInt(point.population());
             buffer.writeVarInt(point.breadSupplied());
             buffer.writeVarInt(point.breadTarget());
+            buffer.writeVarInt(point.buildingMaterialsSupplied());
+            buffer.writeVarInt(point.buildingMaterialsTarget());
             buffer.writeVarInt(point.prosperity());
         }
     }
@@ -62,13 +81,20 @@ public record SettlementSnapshotPacket(
         int breadSupplied = buffer.readVarInt();
         int breadTarget = buffer.readVarInt();
         int dailyBreadConsumption = buffer.readVarInt();
+        int buildingMaterialsSupplied = buffer.readVarInt();
+        int buildingMaterialsTarget = buffer.readVarInt();
+        int growthMaterialCost = buffer.readVarInt();
+        int dailyGrowthAmount = buffer.readVarInt();
         int prosperity = buffer.readVarInt();
+        boolean growthReady = buffer.readBoolean();
         int historySize = Math.min(buffer.readVarInt(), Settlement.HISTORY_LIMIT);
         List<HistoryPointSnapshot> history = new ArrayList<>(historySize);
 
         for (int i = 0; i < historySize; i++) {
             history.add(new HistoryPointSnapshot(
                     buffer.readVarLong(),
+                    buffer.readVarInt(),
+                    buffer.readVarInt(),
                     buffer.readVarInt(),
                     buffer.readVarInt(),
                     buffer.readVarInt(),
@@ -81,7 +107,12 @@ public record SettlementSnapshotPacket(
                 breadSupplied,
                 breadTarget,
                 dailyBreadConsumption,
+                buildingMaterialsSupplied,
+                buildingMaterialsTarget,
+                growthMaterialCost,
+                dailyGrowthAmount,
                 prosperity,
+                growthReady,
                 history
         );
     }
@@ -100,6 +131,8 @@ public record SettlementSnapshotPacket(
             int population,
             int breadSupplied,
             int breadTarget,
+            int buildingMaterialsSupplied,
+            int buildingMaterialsTarget,
             int prosperity
     ) {
     }

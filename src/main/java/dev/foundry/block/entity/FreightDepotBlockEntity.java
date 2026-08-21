@@ -1,6 +1,9 @@
 package dev.foundry.block.entity;
 
 import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
+import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
+import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
+import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModItems;
 import dev.foundry.settlement.Settlement;
@@ -16,7 +19,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
@@ -25,7 +27,7 @@ import net.minecraftforge.items.IItemHandler;
 
 import java.util.List;
 
-public final class FreightDepotBlockEntity extends BlockEntity implements IHaveGoggleInformation {
+public final class FreightDepotBlockEntity extends SmartBlockEntity implements IHaveGoggleInformation {
     private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
     private static final String TAG_POPULATION = "SyncedPopulation";
     private static final String TAG_PROSPERITY = "SyncedProsperity";
@@ -53,11 +55,20 @@ public final class FreightDepotBlockEntity extends BlockEntity implements IHaveG
         super(ModBlockEntities.FREIGHT_DEPOT.get(), pos, state);
     }
 
+    @Override
+    public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
+        behaviours.add(new DirectBeltInputBehaviour(this).allowingBeltFunnels());
+    }
+
     public static void serverTick(Level level, BlockPos pos, BlockState state, FreightDepotBlockEntity blockEntity) {
-        if (level.isClientSide || level.getGameTime() % 10L != 0L) {
+        if (level.isClientSide) {
             return;
         }
-        blockEntity.refreshGoggleState();
+
+        blockEntity.tick();
+        if (level.getGameTime() % 10L == 0L) {
+            blockEntity.refreshGoggleState();
+        }
     }
 
     public void refreshGoggleState() {
@@ -172,14 +183,14 @@ public final class FreightDepotBlockEntity extends BlockEntity implements IHaveG
     }
 
     @Override
-    protected void saveAdditional(CompoundTag tag) {
-        super.saveAdditional(tag);
+    protected void write(CompoundTag tag, boolean clientPacket) {
+        super.write(tag, clientPacket);
         writeSnapshot(tag);
     }
 
     @Override
-    public void load(CompoundTag tag) {
-        super.load(tag);
+    protected void read(CompoundTag tag, boolean clientPacket) {
+        super.read(tag, clientPacket);
         readSnapshot(tag);
     }
 

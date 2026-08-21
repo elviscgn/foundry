@@ -1,6 +1,7 @@
 package dev.foundry.block;
 
 import dev.foundry.block.entity.FreightDepotBlockEntity;
+import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
@@ -17,6 +18,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
@@ -36,11 +39,26 @@ public final class FreightDepotBlock extends BaseEntityBlock {
     }
 
     @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        if (level.isClientSide) {
+            return null;
+        }
+        return createTickerHelper(
+                type,
+                ModBlockEntities.FREIGHT_DEPOT.get(),
+                FreightDepotBlockEntity::serverTick
+        );
+    }
+
+    @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
 
         if (level instanceof ServerLevel serverLevel) {
             SettlementSavedData.get(serverLevel).linkDepot(serverLevel.dimension(), pos);
+            if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+                depot.refreshGoggleState();
+            }
         }
     }
 
@@ -59,6 +77,10 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         Settlement settlement = savedData.getSettlementForDepot(serverLevel.dimension(), pos);
         if (settlement == null) {
             settlement = savedData.linkDepot(serverLevel.dimension(), pos);
+        }
+
+        if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+            depot.refreshGoggleState();
         }
 
         if (settlement == null) {
@@ -87,6 +109,9 @@ public final class FreightDepotBlock extends BaseEntityBlock {
                 heldStack.shrink(accepted);
             }
             savedData.setDirty();
+            if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+                depot.refreshGoggleState();
+            }
             player.displayClientMessage(deliveryMessage(settlement, accepted, commodity), false);
             return InteractionResult.CONSUME;
         }

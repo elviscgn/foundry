@@ -1,7 +1,7 @@
 package dev.foundry.settlement;
 
 public enum SettlementTier {
-    HAMLET("hamlet", "Hamlet", 48),
+    HAMLET("hamlet", "Hamlet", 24),
     TOWN("town", "Town", 64),
     CITY("city", "City", 96),
     METRO("metro", "Metro", 128);

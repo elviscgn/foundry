@@ -3,6 +3,7 @@ package dev.foundry.block;
 import dev.foundry.network.FoundryNetwork;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
+import dev.foundry.settlement.SettlementTier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -56,6 +57,11 @@ public final class TownHallBlock extends Block {
             return InteractionResult.CONSUME;
         }
 
+        SettlementTier tier = data.getSettlementTier(settlement);
+        serverPlayer.displayClientMessage(
+                Component.literal(tier.displayName() + " // Territory radius " + tier.claimRadius() + " blocks"),
+                true
+        );
         FoundryNetwork.sendSettlementSnapshot(serverPlayer, settlement);
         return InteractionResult.CONSUME;
     }

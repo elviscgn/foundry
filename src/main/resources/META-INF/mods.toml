@@ -29,3 +29,10 @@ mandatory=true
 versionRange="[6.0.8,6.1.0)"
 ordering="NONE"
 side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="geolosys"
+mandatory=true
+versionRange="${geolosys_version_range}"
+ordering="AFTER"
+side="BOTH"

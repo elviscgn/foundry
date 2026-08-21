@@ -9,7 +9,8 @@ import java.util.UUID;
 
 public final class Settlement {
     public static final int DEFAULT_POPULATION = 120;
-    public static final int BREAD_TARGET = 64;
+    private static final int BASE_BREAD_TARGET = 64;
+    private static final int BASE_DAILY_BREAD_CONSUMPTION = 16;
 
     private static final String TAG_ID = "Id";
     private static final String TAG_DIMENSION = "Dimension";
@@ -68,7 +69,7 @@ public final class Settlement {
     }
 
     public int deliverBread(int offered) {
-        int accepted = Math.min(Math.max(offered, 0), BREAD_TARGET - breadSupplied);
+        int accepted = Math.min(Math.max(offered, 0), getBreadTarget() - breadSupplied);
         if (accepted <= 0) {
             return 0;
         }
@@ -81,8 +82,37 @@ public final class Settlement {
         return accepted;
     }
 
+    public boolean consumeBreadForDays(long daysElapsed) {
+        if (daysElapsed <= 0 || breadSupplied <= 0) {
+            return false;
+        }
+
+        long requestedConsumption = daysElapsed * (long) getDailyBreadConsumption();
+        int consumed = (int) Math.min((long) breadSupplied, requestedConsumption);
+        if (consumed <= 0) {
+            return false;
+        }
+
+        breadSupplied -= consumed;
+        return true;
+    }
+
+    public int getBreadTarget() {
+        return scaledForPopulation(BASE_BREAD_TARGET);
+    }
+
+    public int getDailyBreadConsumption() {
+        return scaledForPopulation(BASE_DAILY_BREAD_CONSUMPTION);
+    }
+
+    private int scaledForPopulation(int baseAmount) {
+        long scaled = ((long) Math.max(population, 1) * baseAmount + DEFAULT_POPULATION - 1L)
+                / DEFAULT_POPULATION;
+        return (int) Math.max(1L, scaled);
+    }
+
     public boolean isSupplied() {
-        return breadSupplied >= BREAD_TARGET;
+        return breadSupplied >= getBreadTarget();
     }
 
     public boolean matches(ResourceKey<Level> dimension, BlockPos pos) {

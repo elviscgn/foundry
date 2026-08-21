@@ -88,7 +88,7 @@ public final class FreightDepotBlock extends Block {
 
         return Component.literal("Freight Depot | Accepted " + accepted + " bread | ")
                 .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + Settlement.BREAD_TARGET + " | "))
+                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget() + " | "))
                 .append(Component.literal(supplyState).withStyle(stateColor))
                 .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }
@@ -99,7 +99,8 @@ public final class FreightDepotBlock extends Block {
 
         return Component.literal("Freight Depot | Linked | Bread: ")
                 .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + Settlement.BREAD_TARGET))
+                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
+                .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(" | " + supplyState).withStyle(stateColor))
                 .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }

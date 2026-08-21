@@ -10,38 +10,23 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
 public final class ModItems {
-    private static final DeferredRegister<Item> ITEMS =
-            DeferredRegister.create(ForgeRegistries.ITEMS, Foundry.MOD_ID);
+    private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, Foundry.MOD_ID);
 
-    public static final RegistryObject<Item> TOWN_HALL = ITEMS.register(
-            "town_hall",
-            () -> new BlockItem(ModBlocks.TOWN_HALL.get(), new Item.Properties())
-    );
-
-    public static final RegistryObject<Item> FREIGHT_DEPOT = ITEMS.register(
-            "freight_depot",
-            () -> new BlockItem(ModBlocks.FREIGHT_DEPOT.get(), new Item.Properties())
-    );
-
-    public static final RegistryObject<Item> BAKERY = ITEMS.register(
-            "bakery",
-            () -> new BlockItem(ModBlocks.BAKERY.get(), new Item.Properties())
-    );
-
-    public static final RegistryObject<Item> BRICKWORKS = ITEMS.register(
-            "brickworks",
-            () -> new BlockItem(ModBlocks.BRICKWORKS.get(), new Item.Properties())
-    );
+    public static final RegistryObject<Item> TOWN_HALL = blockItem("town_hall", ModBlocks.TOWN_HALL);
+    public static final RegistryObject<Item> FREIGHT_DEPOT = blockItem("freight_depot", ModBlocks.FREIGHT_DEPOT);
+    public static final RegistryObject<Item> BAKERY = blockItem("bakery", ModBlocks.BAKERY);
+    public static final RegistryObject<Item> BRICKWORKS = blockItem("brickworks", ModBlocks.BRICKWORKS);
+    public static final RegistryObject<Item> WAREHOUSE = blockItem("warehouse", ModBlocks.WAREHOUSE);
+    public static final RegistryObject<Item> NATIONAL_STATISTICS_BUREAU =
+            blockItem("national_statistics_bureau", ModBlocks.NATIONAL_STATISTICS_BUREAU);
 
     public static final RegistryObject<Item> SURVEYORS_ROD = ITEMS.register(
-            "surveyors_rod",
-            () -> new SurveyorsRodItem(new Item.Properties())
-    );
+            "surveyors_rod", () -> new SurveyorsRodItem(new Item.Properties()));
 
-    private ModItems() {
+    private static RegistryObject<Item> blockItem(String name, RegistryObject<? extends net.minecraft.world.level.block.Block> block) {
+        return ITEMS.register(name, () -> new BlockItem(block.get(), new Item.Properties()));
     }
 
-    public static void register(IEventBus eventBus) {
-        ITEMS.register(eventBus);
-    }
+    private ModItems() { }
+    public static void register(IEventBus eventBus) { ITEMS.register(eventBus); }
 }

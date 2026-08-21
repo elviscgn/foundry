@@ -25,6 +25,14 @@ public record SettlementSnapshotPacket(
         int foodOutputAverage7d,
         int constructionOutputToday,
         int constructionOutputAverage7d,
+        int breadImportsToday,
+        int breadExportsToday,
+        int brickImportsToday,
+        int brickExportsToday,
+        int breadImportsAverage7d,
+        int breadExportsAverage7d,
+        int brickImportsAverage7d,
+        int brickExportsAverage7d,
         int breadSupplied,
         int breadTarget,
         int dailyBreadConsumption,
@@ -63,6 +71,14 @@ public record SettlementSnapshotPacket(
                 settlement.getFoodOutputAverage(7),
                 settlement.getConstructionOutputToday(),
                 settlement.getConstructionOutputAverage(7),
+                settlement.getBreadImportsToday(),
+                settlement.getBreadExportsToday(),
+                settlement.getBrickImportsToday(),
+                settlement.getBrickExportsToday(),
+                settlement.getBreadImportsAverage(7),
+                settlement.getBreadExportsAverage(7),
+                settlement.getBrickImportsAverage(7),
+                settlement.getBrickExportsAverage(7),
                 settlement.getBreadSupplied(),
                 settlement.getBreadTarget(),
                 settlement.getDailyBreadConsumption(),
@@ -90,6 +106,14 @@ public record SettlementSnapshotPacket(
         buffer.writeVarInt(packet.foodOutputAverage7d);
         buffer.writeVarInt(packet.constructionOutputToday);
         buffer.writeVarInt(packet.constructionOutputAverage7d);
+        buffer.writeVarInt(packet.breadImportsToday);
+        buffer.writeVarInt(packet.breadExportsToday);
+        buffer.writeVarInt(packet.brickImportsToday);
+        buffer.writeVarInt(packet.brickExportsToday);
+        buffer.writeVarInt(packet.breadImportsAverage7d);
+        buffer.writeVarInt(packet.breadExportsAverage7d);
+        buffer.writeVarInt(packet.brickImportsAverage7d);
+        buffer.writeVarInt(packet.brickExportsAverage7d);
         buffer.writeVarInt(packet.breadSupplied);
         buffer.writeVarInt(packet.breadTarget);
         buffer.writeVarInt(packet.dailyBreadConsumption);
@@ -126,6 +150,14 @@ public record SettlementSnapshotPacket(
         int foodOutputAverage7d = buffer.readVarInt();
         int constructionOutputToday = buffer.readVarInt();
         int constructionOutputAverage7d = buffer.readVarInt();
+        int breadImportsToday = buffer.readVarInt();
+        int breadExportsToday = buffer.readVarInt();
+        int brickImportsToday = buffer.readVarInt();
+        int brickExportsToday = buffer.readVarInt();
+        int breadImportsAverage7d = buffer.readVarInt();
+        int breadExportsAverage7d = buffer.readVarInt();
+        int brickImportsAverage7d = buffer.readVarInt();
+        int brickExportsAverage7d = buffer.readVarInt();
         int breadSupplied = buffer.readVarInt();
         int breadTarget = buffer.readVarInt();
         int dailyBreadConsumption = buffer.readVarInt();
@@ -164,6 +196,14 @@ public record SettlementSnapshotPacket(
                 foodOutputAverage7d,
                 constructionOutputToday,
                 constructionOutputAverage7d,
+                breadImportsToday,
+                breadExportsToday,
+                brickImportsToday,
+                brickExportsToday,
+                breadImportsAverage7d,
+                breadExportsAverage7d,
+                brickImportsAverage7d,
+                brickExportsAverage7d,
                 breadSupplied,
                 breadTarget,
                 dailyBreadConsumption,

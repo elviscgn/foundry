@@ -13,6 +13,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
@@ -27,9 +28,14 @@ import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 
 public final class FreightDepotBlockEntity extends SmartBlockEntity implements IHaveGoggleInformation {
     private static final long TICKS_PER_DAY = 24_000L;
+    public static final String TAG_EXPORT_ORIGIN = "FoundryExportOrigin";
+
+    private static final String TAG_OPERATING_MODE = "OperatingMode";
     private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
     private static final String TAG_POPULATION = "SyncedPopulation";
     private static final String TAG_PROSPERITY = "SyncedProsperity";
@@ -43,10 +49,15 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private static final String TAG_CONSTRUCTION_OUTPUT_TODAY = "SyncedConstructionOutputToday";
     private static final String TAG_FOOD_OUTPUT_AVERAGE = "SyncedFoodOutputAverage";
     private static final String TAG_CONSTRUCTION_OUTPUT_AVERAGE = "SyncedConstructionOutputAverage";
+    private static final String TAG_BREAD_IMPORTS = "SyncedBreadImports";
+    private static final String TAG_BREAD_EXPORTS = "SyncedBreadExports";
+    private static final String TAG_BRICK_IMPORTS = "SyncedBrickImports";
+    private static final String TAG_BRICK_EXPORTS = "SyncedBrickExports";
 
     private final IItemHandler depotItemHandler = new DepotItemHandler();
     private LazyOptional<IItemHandler> itemHandlerCapability = LazyOptional.of(() -> depotItemHandler);
 
+    private OperatingMode operatingMode = OperatingMode.INTAKE;
     private boolean settlementLinked;
     private int syncedPopulation;
     private int syncedProsperity;
@@ -60,6 +71,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private int syncedConstructionOutputToday;
     private int syncedFoodOutputAverage;
     private int syncedConstructionOutputAverage;
+    private int syncedBreadImports;
+    private int syncedBreadExports;
+    private int syncedBrickImports;
+    private int syncedBrickExports;
 
     public FreightDepotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.FREIGHT_DEPOT.get(), pos, state);
@@ -81,6 +96,35 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         }
     }
 
+    public String cycleOperatingMode() {
+        operatingMode = operatingMode.next();
+        setChanged();
+        if (level instanceof ServerLevel serverLevel) {
+            BlockState state = getBlockState();
+            serverLevel.sendBlockUpdated(worldPosition, state, state, Block.UPDATE_CLIENTS | Block.UPDATE_NEIGHBORS);
+        }
+        return operatingMode.displayName();
+    }
+
+    public String getOperatingModeLabel() {
+        return operatingMode.displayName();
+    }
+
+    public boolean isIntakeMode() {
+        return operatingMode == OperatingMode.INTAKE;
+    }
+
+    public static UUID getDomesticTradeOrigin(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) {
+            return null;
+        }
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.hasUUID(TAG_EXPORT_ORIGIN)) {
+            return null;
+        }
+        return tag.getUUID(TAG_EXPORT_ORIGIN);
+    }
+
     public void refreshGoggleState() {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
@@ -94,7 +138,8 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         boolean changed;
         if (settlement == null) {
-            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false, 0, 0, 0, 0);
+            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false,
+                    0, 0, 0, 0, 0, 0, 0, 0);
         } else {
             changed = applySnapshot(
                     true,
@@ -109,7 +154,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                     settlement.getFoodOutputToday(),
                     settlement.getConstructionOutputToday(),
                     settlement.getFoodOutputAverage(7),
-                    settlement.getConstructionOutputAverage(7)
+                    settlement.getConstructionOutputAverage(7),
+                    settlement.getBreadImportsToday(),
+                    settlement.getBreadExportsToday(),
+                    settlement.getBrickImportsToday(),
+                    settlement.getBrickExportsToday()
             );
         }
 
@@ -124,7 +173,8 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                                   int breadSupplied, int breadTarget, int dailyBread,
                                   int materialsSupplied, int materialsTarget, boolean growthReady,
                                   int foodOutputToday, int constructionOutputToday,
-                                  int foodOutputAverage, int constructionOutputAverage) {
+                                  int foodOutputAverage, int constructionOutputAverage,
+                                  int breadImports, int breadExports, int brickImports, int brickExports) {
         boolean changed = settlementLinked != linked
                 || syncedPopulation != population
                 || syncedProsperity != prosperity
@@ -137,7 +187,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 || syncedFoodOutputToday != foodOutputToday
                 || syncedConstructionOutputToday != constructionOutputToday
                 || syncedFoodOutputAverage != foodOutputAverage
-                || syncedConstructionOutputAverage != constructionOutputAverage;
+                || syncedConstructionOutputAverage != constructionOutputAverage
+                || syncedBreadImports != breadImports
+                || syncedBreadExports != breadExports
+                || syncedBrickImports != brickImports
+                || syncedBrickExports != brickExports;
 
         settlementLinked = linked;
         syncedPopulation = population;
@@ -152,12 +206,20 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedConstructionOutputToday = constructionOutputToday;
         syncedFoodOutputAverage = foodOutputAverage;
         syncedConstructionOutputAverage = constructionOutputAverage;
+        syncedBreadImports = breadImports;
+        syncedBreadExports = breadExports;
+        syncedBrickImports = brickImports;
+        syncedBrickExports = brickExports;
         return changed;
     }
 
     @Override
     public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
         tooltip.add(Component.literal("Freight Depot").withStyle(ChatFormatting.GOLD));
+        tooltip.add(Component.literal("  Mode: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(operatingMode.displayName())
+                        .withStyle(operatingMode == OperatingMode.INTAKE
+                                ? ChatFormatting.GREEN : ChatFormatting.GOLD)));
 
         if (!settlementLinked) {
             tooltip.add(Component.literal("  No linked settlement").withStyle(ChatFormatting.RED));
@@ -181,6 +243,16 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                         .withStyle(ChatFormatting.GREEN))
                 .append(Component.literal("  Construction " + syncedConstructionOutputAverage + "/day")
                         .withStyle(ChatFormatting.AQUA)));
+        tooltip.add(Component.literal("  Domestic trade today: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("Bread +" + syncedBreadImports + "/-" + syncedBreadExports)
+                        .withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal("  Bricks +" + syncedBrickImports + "/-" + syncedBrickExports)
+                        .withStyle(ChatFormatting.AQUA)));
+
+        if (operatingMode != OperatingMode.INTAKE) {
+            tooltip.add(Component.literal("  Export through a funnel/chute into Create logistics")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        }
 
         Component growth;
         if (syncedGrowthReady) {
@@ -238,6 +310,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     }
 
     private void writeSnapshot(CompoundTag tag) {
+        tag.putString(TAG_OPERATING_MODE, operatingMode.serializedName());
         tag.putBoolean(TAG_SETTLEMENT_LINKED, settlementLinked);
         tag.putInt(TAG_POPULATION, syncedPopulation);
         tag.putInt(TAG_PROSPERITY, syncedProsperity);
@@ -251,9 +324,16 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         tag.putInt(TAG_CONSTRUCTION_OUTPUT_TODAY, syncedConstructionOutputToday);
         tag.putInt(TAG_FOOD_OUTPUT_AVERAGE, syncedFoodOutputAverage);
         tag.putInt(TAG_CONSTRUCTION_OUTPUT_AVERAGE, syncedConstructionOutputAverage);
+        tag.putInt(TAG_BREAD_IMPORTS, syncedBreadImports);
+        tag.putInt(TAG_BREAD_EXPORTS, syncedBreadExports);
+        tag.putInt(TAG_BRICK_IMPORTS, syncedBrickImports);
+        tag.putInt(TAG_BRICK_EXPORTS, syncedBrickExports);
     }
 
     private void readSnapshot(CompoundTag tag) {
+        operatingMode = tag.contains(TAG_OPERATING_MODE, Tag.TAG_STRING)
+                ? OperatingMode.fromSerializedName(tag.getString(TAG_OPERATING_MODE))
+                : OperatingMode.INTAKE;
         settlementLinked = tag.getBoolean(TAG_SETTLEMENT_LINKED);
         syncedPopulation = tag.getInt(TAG_POPULATION);
         syncedProsperity = tag.getInt(TAG_PROSPERITY);
@@ -267,6 +347,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedConstructionOutputToday = tag.getInt(TAG_CONSTRUCTION_OUTPUT_TODAY);
         syncedFoodOutputAverage = tag.getInt(TAG_FOOD_OUTPUT_AVERAGE);
         syncedConstructionOutputAverage = tag.getInt(TAG_CONSTRUCTION_OUTPUT_AVERAGE);
+        syncedBreadImports = tag.getInt(TAG_BREAD_IMPORTS);
+        syncedBreadExports = tag.getInt(TAG_BREAD_EXPORTS);
+        syncedBrickImports = tag.getInt(TAG_BRICK_IMPORTS);
+        syncedBrickExports = tag.getInt(TAG_BRICK_EXPORTS);
     }
 
     @Override
@@ -299,6 +383,43 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         return null;
     }
 
+    private ItemStack createExportStack(Settlement settlement, int amount) {
+        if (amount <= 0 || operatingMode == OperatingMode.INTAKE) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack stack = new ItemStack(
+                operatingMode == OperatingMode.EXPORT_BREAD ? Items.BREAD : Items.BRICK,
+                amount
+        );
+        stack.getOrCreateTag().putUUID(TAG_EXPORT_ORIGIN, settlement.getId());
+        return stack;
+    }
+
+    private int exportAvailable(Settlement settlement) {
+        return switch (operatingMode) {
+            case INTAKE -> 0;
+            case EXPORT_BREAD -> settlement.getBreadSupplied();
+            case EXPORT_BRICKS -> settlement.getBuildingMaterialsSupplied();
+        };
+    }
+
+    private int withdrawExport(Settlement settlement, int amount) {
+        return switch (operatingMode) {
+            case INTAKE -> 0;
+            case EXPORT_BREAD -> settlement.withdrawBread(amount);
+            case EXPORT_BRICKS -> settlement.withdrawBuildingMaterials(amount);
+        };
+    }
+
+    private IndustryType exportIndustryType() {
+        return switch (operatingMode) {
+            case INTAKE -> null;
+            case EXPORT_BREAD -> IndustryType.BAKERY;
+            case EXPORT_BRICKS -> IndustryType.BRICKWORKS;
+        };
+    }
+
     private final class DepotItemHandler implements IItemHandler {
         @Override
         public int getSlots() {
@@ -307,12 +428,26 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         @Override
         public ItemStack getStackInSlot(int slot) {
-            return ItemStack.EMPTY;
+            if (slot != 0 || operatingMode == OperatingMode.INTAKE || !(level instanceof ServerLevel serverLevel)) {
+                return ItemStack.EMPTY;
+            }
+
+            SettlementSavedData savedData = SettlementSavedData.get(serverLevel);
+            Settlement settlement = savedData.getSettlementForDepot(serverLevel.dimension(), worldPosition);
+            if (settlement == null) {
+                settlement = savedData.linkDepot(serverLevel.dimension(), worldPosition);
+            }
+            if (settlement == null) {
+                return ItemStack.EMPTY;
+            }
+
+            return createExportStack(settlement, Math.min(64, exportAvailable(settlement)));
         }
 
         @Override
         public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
-            if (slot != 0 || stack.isEmpty() || !isAcceptedCommodity(stack)) {
+            if (slot != 0 || operatingMode != OperatingMode.INTAKE
+                    || stack.isEmpty() || !isAcceptedCommodity(stack)) {
                 return stack;
             }
 
@@ -341,13 +476,24 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 if (accepted > 0) {
                     IndustryType industryType = industryTypeFor(stack);
                     long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
-                    savedData.recordIndustryOutputForDepot(
-                            serverLevel.dimension(),
-                            worldPosition,
-                            industryType,
-                            accepted,
-                            currentDay
-                    );
+                    UUID originSettlementId = getDomesticTradeOrigin(stack);
+                    if (originSettlementId != null) {
+                        savedData.recordDomesticImport(
+                                originSettlementId,
+                                settlement,
+                                industryType,
+                                accepted,
+                                currentDay
+                        );
+                    } else {
+                        savedData.recordIndustryOutputForDepot(
+                                serverLevel.dimension(),
+                                worldPosition,
+                                industryType,
+                                accepted,
+                                currentDay
+                        );
+                    }
                     savedData.setDirty();
                     refreshGoggleState();
                 }
@@ -384,7 +530,39 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         @Override
         public ItemStack extractItem(int slot, int amount, boolean simulate) {
-            return ItemStack.EMPTY;
+            if (slot != 0 || amount <= 0 || operatingMode == OperatingMode.INTAKE
+                    || !(level instanceof ServerLevel serverLevel)) {
+                return ItemStack.EMPTY;
+            }
+
+            SettlementSavedData savedData = SettlementSavedData.get(serverLevel);
+            Settlement settlement = savedData.getSettlementForDepot(serverLevel.dimension(), worldPosition);
+            if (settlement == null) {
+                settlement = savedData.linkDepot(serverLevel.dimension(), worldPosition);
+            }
+            if (settlement == null) {
+                return ItemStack.EMPTY;
+            }
+
+            int requested = Math.min(Math.min(amount, 64), exportAvailable(settlement));
+            if (requested <= 0) {
+                return ItemStack.EMPTY;
+            }
+
+            if (simulate) {
+                return createExportStack(settlement, requested);
+            }
+
+            int removed = withdrawExport(settlement, requested);
+            if (removed <= 0) {
+                return ItemStack.EMPTY;
+            }
+
+            long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
+            savedData.recordDomesticExport(settlement, exportIndustryType(), removed, currentDay);
+            savedData.setDirty();
+            refreshGoggleState();
+            return createExportStack(settlement, removed);
         }
 
         @Override
@@ -394,7 +572,44 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         @Override
         public boolean isItemValid(int slot, ItemStack stack) {
-            return slot == 0 && isAcceptedCommodity(stack);
+            return slot == 0 && operatingMode == OperatingMode.INTAKE && isAcceptedCommodity(stack);
+        }
+    }
+
+    private enum OperatingMode {
+        INTAKE("Intake"),
+        EXPORT_BREAD("Export Bread"),
+        EXPORT_BRICKS("Export Bricks");
+
+        private final String displayName;
+
+        OperatingMode(String displayName) {
+            this.displayName = displayName;
+        }
+
+        String displayName() {
+            return displayName;
+        }
+
+        String serializedName() {
+            return name().toLowerCase(Locale.ROOT);
+        }
+
+        OperatingMode next() {
+            OperatingMode[] values = values();
+            return values[(ordinal() + 1) % values.length];
+        }
+
+        static OperatingMode fromSerializedName(String name) {
+            if (name == null || name.isBlank()) {
+                return INTAKE;
+            }
+            for (OperatingMode mode : values()) {
+                if (mode.serializedName().equals(name)) {
+                    return mode;
+                }
+            }
+            return INTAKE;
         }
     }
 }

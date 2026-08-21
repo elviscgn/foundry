@@ -23,8 +23,9 @@ public final class SettlementSavedData extends SavedData {
     private static final String TAG_DEPOTS = "Depots";
     private static final String TAG_INDUSTRIES = "Industries";
     private static final String TAG_LAST_PROCESSED_DAY = "LastProcessedDay";
-    private static final int DEFAULT_DEPOT_LINK_RANGE = 128;
-    private static final int DEFAULT_INDUSTRY_LINK_RANGE = 128;
+    public static final int DEFAULT_SETTLEMENT_RADIUS = 64;
+    private static final int DEFAULT_DEPOT_LINK_RANGE = DEFAULT_SETTLEMENT_RADIUS;
+    private static final int DEFAULT_INDUSTRY_LINK_RANGE = DEFAULT_SETTLEMENT_RADIUS;
     private static final long TICKS_PER_DAY = 24_000L;
 
     private final Map<UUID, Settlement> settlementsById = new HashMap<>();
@@ -238,7 +239,7 @@ public final class SettlementSavedData extends SavedData {
             return new IndustryLinkResult(
                     true,
                     false,
-                    type.displayName() + " // LINK FAILED // No Town Hall within 128 blocks"
+                    type.displayName() + " // LINK FAILED // No Town Hall within " + DEFAULT_SETTLEMENT_RADIUS + " blocks"
             );
         }
 
@@ -267,7 +268,11 @@ public final class SettlementSavedData extends SavedData {
             depotSettlement = linkDepot(dimension, depotPos);
         }
         if (depotSettlement == null) {
-            return new IndustryLinkResult(true, false, "Freight Depot // LINK FAILED // No Town Hall within 128 blocks");
+            return new IndustryLinkResult(
+                    true,
+                    false,
+                    "Freight Depot // LINK FAILED // No Town Hall within " + DEFAULT_SETTLEMENT_RADIUS + " blocks"
+            );
         }
 
         String depotDimension = dimension.location().toString();

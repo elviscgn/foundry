@@ -25,9 +25,11 @@ import java.util.UUID;
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class SurveyOverlayEvents {
     private static final int SURVEY_RADIUS = 192;
-    private static final int SAMPLE_STEP = 8;
-    private static final int REFRESH_TICKS = 10;
+    private static final int SAMPLE_STEP = 4;
+    private static final int REFRESH_TICKS = 5;
     private static final int LINK_PARTICLE_SPACING = 6;
+    private static final int CLAIM_RING_STEP_DEGREES = 4;
+    private static final int BOUNDARY_POST_LEVELS = 5;
 
     private SurveyOverlayEvents() {
     }
@@ -64,6 +66,11 @@ public final class SurveyOverlayEvents {
     private static void renderBoundaries(ServerLevel level, ServerPlayer player, List<SurveySettlement> towns) {
         BlockPos center = player.blockPosition();
         UUID currentTown = ownerAt(towns, center);
+
+        // Always draw the explicit 128-block claim perimeter. This makes a single town's
+        // outer edge immediately legible instead of requiring another town to create a split.
+        renderClaimPerimeters(level, player, towns, currentTown);
+
         int minX = Math.floorDiv(center.getX() - SURVEY_RADIUS, SAMPLE_STEP) * SAMPLE_STEP;
         int maxX = center.getX() + SURVEY_RADIUS;
         int minZ = Math.floorDiv(center.getZ() - SURVEY_RADIUS, SAMPLE_STEP) * SAMPLE_STEP;
@@ -84,6 +91,8 @@ public final class SurveyOverlayEvents {
             }
         }
 
+        // Also trace ownership changes inside overlapping claim circles. This is the
+        // effective border between two towns where nearest-Town-Hall ownership changes.
         for (int ix = 0; ix < columns; ix++) {
             int x = minX + ix * SAMPLE_STEP;
             for (int iz = 0; iz < rows; iz++) {
@@ -111,6 +120,59 @@ public final class SurveyOverlayEvents {
         }
     }
 
+    private static void renderClaimPerimeters(ServerLevel level, ServerPlayer player,
+                                              List<SurveySettlement> towns, UUID currentTown) {
+        BlockPos center = player.blockPosition();
+        long visibleSqr = (long) SURVEY_RADIUS * SURVEY_RADIUS;
+        int claimRange = SettlementSurveySnapshot.CLAIM_RANGE;
+
+        for (SurveySettlement town : towns) {
+            BlockPos hall = town.townHallPos();
+            DustParticleOptions particle = townDust(
+                    town.id(),
+                    town.id().equals(currentTown) ? 1.5F : 1.05F
+            );
+
+            for (int degrees = 0; degrees < 360; degrees += CLAIM_RING_STEP_DEGREES) {
+                double angle = Math.toRadians(degrees);
+                double cos = Math.cos(angle);
+                double sin = Math.sin(angle);
+                double x = hall.getX() + 0.5 + cos * claimRange;
+                double z = hall.getZ() + 0.5 + sin * claimRange;
+
+                BlockPos boundaryPos = new BlockPos((int) Math.floor(x), center.getY(), (int) Math.floor(z));
+                if (horizontalDistanceSqr(center, boundaryPos) > visibleSqr) {
+                    continue;
+                }
+
+                Integer y = surfaceY(level, boundaryPos.getX(), boundaryPos.getZ(), center.getY());
+                if (y == null) {
+                    continue;
+                }
+
+                // Only draw the outer ring where it is still this town's real edge.
+                // If another town has already taken ownership before the 128-block edge,
+                // the interior split is drawn by the sampled ownership-border pass above.
+                BlockPos justInside = new BlockPos(
+                        (int) Math.floor(hall.getX() + 0.5 + cos * (claimRange - 2)),
+                        y,
+                        (int) Math.floor(hall.getZ() + 0.5 + sin * (claimRange - 2))
+                );
+                BlockPos justOutside = new BlockPos(
+                        (int) Math.floor(hall.getX() + 0.5 + cos * (claimRange + 2)),
+                        y,
+                        (int) Math.floor(hall.getZ() + 0.5 + sin * (claimRange + 2))
+                );
+                if (!town.id().equals(ownerAt(towns, justInside))
+                        || town.id().equals(ownerAt(towns, justOutside))) {
+                    continue;
+                }
+
+                renderBoundaryPost(level, player, x, y, z, particle, degrees % 16 == 0);
+            }
+        }
+    }
+
     private static void renderBoundaryDot(ServerLevel level, ServerPlayer player, double x, double z,
                                           UUID first, UUID second, UUID currentTown, int fallbackY) {
         Integer y = surfaceY(level, (int) Math.floor(x), (int) Math.floor(z), fallbackY);
@@ -119,12 +181,23 @@ public final class SurveyOverlayEvents {
         }
 
         if (first != null) {
-            float scale = first.equals(currentTown) ? 1.35F : 0.95F;
-            sendParticle(level, player, townDust(first, scale), x, y + 0.18, z);
+            float scale = first.equals(currentTown) ? 1.45F : 1.0F;
+            renderBoundaryPost(level, player, x, y, z, townDust(first, scale), false);
         }
         if (second != null && !second.equals(first)) {
-            float scale = second.equals(currentTown) ? 1.35F : 0.95F;
-            sendParticle(level, player, townDust(second, scale), x, y + 0.38, z);
+            float scale = second.equals(currentTown) ? 1.45F : 1.0F;
+            renderBoundaryPost(level, player, x + 0.16, y, z + 0.16, townDust(second, scale), false);
+        }
+    }
+
+    private static void renderBoundaryPost(ServerLevel level, ServerPlayer player, double x, int y, double z,
+                                           DustParticleOptions particle, boolean tallMarker) {
+        int levels = tallMarker ? BOUNDARY_POST_LEVELS : 3;
+        for (int i = 0; i < levels; i++) {
+            sendParticle(level, player, particle, x, y + 0.22 + i * 0.72, z);
+        }
+        if (tallMarker) {
+            sendParticle(level, player, ParticleTypes.END_ROD, x, y + 4.1, z);
         }
     }
 
@@ -194,11 +267,11 @@ public final class SurveyOverlayEvents {
 
     private static UUID ownerAt(List<SurveySettlement> towns, BlockPos pos) {
         UUID nearest = null;
-        double nearestDistance = (double) SettlementSurveySnapshot.CLAIM_RANGE
+        long nearestDistance = (long) SettlementSurveySnapshot.CLAIM_RANGE
                 * SettlementSurveySnapshot.CLAIM_RANGE;
 
         for (SurveySettlement town : towns) {
-            double distance = town.townHallPos().distSqr(pos);
+            long distance = horizontalDistanceSqr(town.townHallPos(), pos);
             if (distance <= nearestDistance) {
                 nearest = town.id();
                 nearestDistance = distance;

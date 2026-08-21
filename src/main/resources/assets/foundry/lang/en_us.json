@@ -2,5 +2,8 @@
   "block.foundry.town_hall": "Town Hall",
   "block.foundry.freight_depot": "Freight Depot",
   "block.foundry.bakery": "Bakery",
-  "block.foundry.brickworks": "Brickworks"
+  "block.foundry.brickworks": "Brickworks",
+  "item.foundry.surveyors_rod": "Surveyor's Rod",
+  "item.foundry.surveyors_rod.tooltip": "Hold to reveal settlement boundaries and civic links.",
+  "item.foundry.surveyors_rod.tooltip_detail": "The survey overlay is temporary and visible only to you."
 }

@@ -2,6 +2,7 @@ package dev.foundry.network.packet;
 
 import dev.foundry.client.ClientSettlementScreens;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementTier;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
@@ -12,6 +13,8 @@ import java.util.List;
 import java.util.function.Supplier;
 
 public record SettlementSnapshotPacket(
+        String settlementTier,
+        int claimRadius,
         int population,
         int workforce,
         int employed,
@@ -56,8 +59,11 @@ public record SettlementSnapshotPacket(
                         point.prosperity()
                 ))
                 .toList();
+        SettlementTier tier = SettlementTier.forSettlement(settlement);
 
         return new SettlementSnapshotPacket(
+                tier.displayName(),
+                tier.claimRadius(),
                 settlement.getPopulation(),
                 settlement.getWorkforce(),
                 settlement.getEmployed(),
@@ -93,6 +99,8 @@ public record SettlementSnapshotPacket(
     }
 
     public static void encode(SettlementSnapshotPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeUtf(packet.settlementTier, 32);
+        buffer.writeVarInt(packet.claimRadius);
         buffer.writeVarInt(packet.population);
         buffer.writeVarInt(packet.workforce);
         buffer.writeVarInt(packet.employed);
@@ -137,6 +145,8 @@ public record SettlementSnapshotPacket(
     }
 
     public static SettlementSnapshotPacket decode(FriendlyByteBuf buffer) {
+        String settlementTier = buffer.readUtf(32);
+        int claimRadius = buffer.readVarInt();
         int population = buffer.readVarInt();
         int workforce = buffer.readVarInt();
         int employed = buffer.readVarInt();
@@ -183,6 +193,8 @@ public record SettlementSnapshotPacket(
         }
 
         return new SettlementSnapshotPacket(
+                settlementTier,
+                claimRadius,
                 population,
                 workforce,
                 employed,

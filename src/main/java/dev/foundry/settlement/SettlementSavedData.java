@@ -23,9 +23,7 @@ public final class SettlementSavedData extends SavedData {
     private static final String TAG_DEPOTS = "Depots";
     private static final String TAG_INDUSTRIES = "Industries";
     private static final String TAG_LAST_PROCESSED_DAY = "LastProcessedDay";
-    public static final int DEFAULT_SETTLEMENT_RADIUS = 64;
-    private static final int DEFAULT_DEPOT_LINK_RANGE = DEFAULT_SETTLEMENT_RADIUS;
-    private static final int DEFAULT_INDUSTRY_LINK_RANGE = DEFAULT_SETTLEMENT_RADIUS;
+    public static final int DEFAULT_SETTLEMENT_RADIUS = SettlementTier.HAMLET.claimRadius();
     private static final long TICKS_PER_DAY = 24_000L;
 
     private final Map<UUID, Settlement> settlementsById = new HashMap<>();
@@ -100,6 +98,18 @@ public final class SettlementSavedData extends SavedData {
         return settlement;
     }
 
+    public Settlement getSettlement(UUID settlementId) {
+        return settlementId == null ? null : settlementsById.get(settlementId);
+    }
+
+    public SettlementTier getSettlementTier(Settlement settlement) {
+        return SettlementTier.forSettlement(settlement);
+    }
+
+    public SettlementTier getSettlementTier(UUID settlementId) {
+        return getSettlementTier(getSettlement(settlementId));
+    }
+
     public void remove(ResourceKey<Level> dimension, BlockPos pos) {
         String locationKey = Settlement.locationKey(dimension, pos);
         UUID settlementId = settlementIdsByLocation.remove(locationKey);
@@ -135,7 +145,7 @@ public final class SettlementSavedData extends SavedData {
             return existing;
         }
 
-        Settlement nearest = findNearestSettlement(dimension, depotPos, DEFAULT_DEPOT_LINK_RANGE);
+        Settlement nearest = findNearestSettlement(dimension, depotPos);
         if (nearest == null) {
             return null;
         }
@@ -194,7 +204,7 @@ public final class SettlementSavedData extends SavedData {
         }
 
         UUID oldSettlementId = existingSite == null ? null : existingSite.settlementId();
-        Settlement nearest = findNearestSettlement(dimension, industryPos, DEFAULT_INDUSTRY_LINK_RANGE);
+        Settlement nearest = findNearestSettlement(dimension, industryPos);
         if (nearest == null) {
             if (existingSite != null) {
                 industrySitesByLocation.remove(locationKey);
@@ -239,7 +249,7 @@ public final class SettlementSavedData extends SavedData {
             return new IndustryLinkResult(
                     true,
                     false,
-                    type.displayName() + " // LINK FAILED // No Town Hall within " + DEFAULT_SETTLEMENT_RADIUS + " blocks"
+                    type.displayName() + " // LINK FAILED // No settlement territory covers this block"
             );
         }
 
@@ -271,7 +281,7 @@ public final class SettlementSavedData extends SavedData {
             return new IndustryLinkResult(
                     true,
                     false,
-                    "Freight Depot // LINK FAILED // No Town Hall within " + DEFAULT_SETTLEMENT_RADIUS + " blocks"
+                    "Freight Depot // LINK FAILED // No settlement territory covers this block"
             );
         }
 
@@ -503,17 +513,18 @@ public final class SettlementSavedData extends SavedData {
         return daysElapsed;
     }
 
-    private Settlement findNearestSettlement(ResourceKey<Level> dimension, BlockPos pos, int maxDistance) {
+    private Settlement findNearestSettlement(ResourceKey<Level> dimension, BlockPos pos) {
         Settlement nearest = null;
-        double nearestDistance = (double) maxDistance * maxDistance;
+        double nearestDistance = Double.MAX_VALUE;
 
         for (Settlement settlement : settlementsById.values()) {
             if (!settlement.isInDimension(dimension)) {
                 continue;
             }
 
+            int claimRadius = getSettlementTier(settlement).claimRadius();
             double distance = settlement.distanceToSqr(pos);
-            if (distance <= nearestDistance) {
+            if (distance <= (double) claimRadius * claimRadius && distance < nearestDistance) {
                 nearest = settlement;
                 nearestDistance = distance;
             }

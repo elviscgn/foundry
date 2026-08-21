@@ -18,7 +18,7 @@ import java.util.UUID;
  * This deliberately carries only spatial data needed by the in-world survey overlay.
  */
 public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
-    public static final int CLAIM_RANGE = SettlementSavedData.DEFAULT_SETTLEMENT_RADIUS;
+    public static final int MAX_CLAIM_RANGE = SettlementTier.METRO.claimRadius();
 
     public SettlementSurveySnapshot {
         settlements = List.copyOf(settlements);
@@ -28,7 +28,7 @@ public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
                                                    BlockPos center, int visibleRange) {
         CompoundTag root = data.save(new CompoundTag());
         String dimensionName = dimension.location().toString();
-        int hallRange = Math.max(0, visibleRange) + CLAIM_RANGE;
+        int hallRange = Math.max(0, visibleRange) + MAX_CLAIM_RANGE;
         long hallRangeSqr = (long) hallRange * hallRange;
         long nodeRangeSqr = (long) Math.max(0, visibleRange) * Math.max(0, visibleRange);
 
@@ -45,7 +45,8 @@ public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
                 continue;
             }
             UUID id = tag.getUUID("Id");
-            visible.put(id, new MutableSurveySettlement(id, hallPos));
+            SettlementTier tier = data.getSettlementTier(id);
+            visible.put(id, new MutableSurveySettlement(id, hallPos, tier));
         }
 
         if (visible.isEmpty()) {
@@ -101,6 +102,7 @@ public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
             result.add(new SurveySettlement(
                     town.id,
                     town.townHallPos,
+                    town.tier,
                     List.copyOf(town.depots),
                     List.copyOf(town.industries)
             ));
@@ -117,9 +119,13 @@ public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
     public record SurveySettlement(
             UUID id,
             BlockPos townHallPos,
+            SettlementTier tier,
             List<BlockPos> depotPositions,
             List<SurveyIndustry> industries
     ) {
+        public int claimRadius() {
+            return tier.claimRadius();
+        }
     }
 
     public record SurveyIndustry(BlockPos pos, IndustryType type, BlockPos linkedDepotPos) {
@@ -128,12 +134,14 @@ public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
     private static final class MutableSurveySettlement {
         private final UUID id;
         private final BlockPos townHallPos;
+        private final SettlementTier tier;
         private final List<BlockPos> depots = new ArrayList<>();
         private final List<SurveyIndustry> industries = new ArrayList<>();
 
-        private MutableSurveySettlement(UUID id, BlockPos townHallPos) {
+        private MutableSurveySettlement(UUID id, BlockPos townHallPos, SettlementTier tier) {
             this.id = id;
             this.townHallPos = townHallPos;
+            this.tier = tier;
         }
     }
 }

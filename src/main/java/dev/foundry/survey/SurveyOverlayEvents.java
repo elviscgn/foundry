@@ -67,8 +67,8 @@ public final class SurveyOverlayEvents {
         BlockPos center = player.blockPosition();
         UUID currentTown = ownerAt(towns, center);
 
-        // Always draw the explicit 128-block claim perimeter. This makes a single town's
-        // outer edge immediately legible instead of requiring another town to create a split.
+        // Draw each settlement's current tier perimeter. Hamlet/Town/City/Metro can
+        // therefore be read directly in-world as their economic development changes.
         renderClaimPerimeters(level, player, towns, currentTown);
 
         int minX = Math.floorDiv(center.getX() - SURVEY_RADIUS, SAMPLE_STEP) * SAMPLE_STEP;
@@ -91,8 +91,7 @@ public final class SurveyOverlayEvents {
             }
         }
 
-        // Also trace ownership changes inside overlapping claim circles. This is the
-        // effective border between two towns where nearest-Town-Hall ownership changes.
+        // Where claims overlap, trace the actual ownership split: nearest Town Hall wins.
         for (int ix = 0; ix < columns; ix++) {
             int x = minX + ix * SAMPLE_STEP;
             for (int iz = 0; iz < rows; iz++) {
@@ -124,10 +123,10 @@ public final class SurveyOverlayEvents {
                                               List<SurveySettlement> towns, UUID currentTown) {
         BlockPos center = player.blockPosition();
         long visibleSqr = (long) SURVEY_RADIUS * SURVEY_RADIUS;
-        int claimRange = SettlementSurveySnapshot.CLAIM_RANGE;
 
         for (SurveySettlement town : towns) {
             BlockPos hall = town.townHallPos();
+            int claimRange = town.claimRadius();
             DustParticleOptions particle = townDust(
                     town.id(),
                     town.id().equals(currentTown) ? 1.5F : 1.05F
@@ -150,13 +149,13 @@ public final class SurveyOverlayEvents {
                     continue;
                 }
 
-                // Only draw the outer ring where it is still this town's real edge.
-                // If another town has already taken ownership before the 128-block edge,
-                // the interior split is drawn by the sampled ownership-border pass above.
+                // Only draw the outer ring where it is still this settlement's real edge.
+                // If another settlement wins before this tier's maximum radius, the
+                // interior split is drawn by the sampled ownership-border pass above.
                 BlockPos justInside = new BlockPos(
-                        (int) Math.floor(hall.getX() + 0.5 + cos * (claimRange - 2)),
+                        (int) Math.floor(hall.getX() + 0.5 + cos * Math.max(0, claimRange - 2)),
                         y,
-                        (int) Math.floor(hall.getZ() + 0.5 + sin * (claimRange - 2))
+                        (int) Math.floor(hall.getZ() + 0.5 + sin * Math.max(0, claimRange - 2))
                 );
                 BlockPos justOutside = new BlockPos(
                         (int) Math.floor(hall.getX() + 0.5 + cos * (claimRange + 2)),
@@ -267,12 +266,12 @@ public final class SurveyOverlayEvents {
 
     private static UUID ownerAt(List<SurveySettlement> towns, BlockPos pos) {
         UUID nearest = null;
-        long nearestDistance = (long) SettlementSurveySnapshot.CLAIM_RANGE
-                * SettlementSurveySnapshot.CLAIM_RANGE;
+        long nearestDistance = Long.MAX_VALUE;
 
         for (SurveySettlement town : towns) {
             long distance = horizontalDistanceSqr(town.townHallPos(), pos);
-            if (distance <= nearestDistance) {
+            long claimSqr = (long) town.claimRadius() * town.claimRadius();
+            if (distance <= claimSqr && distance < nearestDistance) {
                 nearest = town.id();
                 nearestDistance = distance;
             }

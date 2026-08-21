@@ -25,7 +25,7 @@ public final class SettlementFinance {
 
     private static final int INITIAL_LOCAL_KORA_PER_CAPITA = 20;
     private static final int INITIAL_TREASURY_KORA_PER_CAPITA = 5;
-    private static final int BASE_BREAD_PRICE = 8;
+    private static final int BASE_BREAD_PRICE = 6;
     private static final int BASE_BRICK_PRICE = 12;
 
     private static final String TAG_SETTLEMENT_ID = "SettlementId";

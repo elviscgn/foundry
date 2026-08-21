@@ -29,13 +29,13 @@ public enum SettlementTier {
     }
 
     /**
-     * Prototype development classification. The tier is deliberately derived from the
-     * settlement's real economy rather than a manual upgrade button.
+     * Development classification derived from the settlement's real economy.
      *
-     * Hamlet is always the starting state. Town requires an established labor market.
-     * City and Metro additionally require a diversified productive base, so a large
-     * single-purpose extraction settlement can remain a Town instead of automatically
-     * becoming a metropolis just because one industry is successful.
+     * Population and jobs still matter, but a settlement must now also cross structural
+     * Prosperity thresholds. That score reflects employment, industrial depth, measured
+     * physical output, supply reliability, freight integration, and sector diversity.
+     * Large specialist settlements can therefore remain Towns instead of becoming Metros
+     * purely because population grew.
      */
     public static SettlementTier forSettlement(Settlement settlement) {
         if (settlement == null) {
@@ -45,11 +45,13 @@ public enum SettlementTier {
         int population = settlement.getPopulation();
         int jobs = settlement.getTotalJobCapacity();
         int employed = settlement.getEmployed();
+        int prosperity = settlement.getProsperity();
         boolean diversified = settlement.getFoodJobCapacity() > 0 && settlement.getConstructionJobCapacity() > 0;
 
         if (population >= 1_500
                 && jobs >= 96
                 && employed >= 72
+                && prosperity >= 70
                 && diversified) {
             return METRO;
         }
@@ -57,13 +59,15 @@ public enum SettlementTier {
         if (population >= 600
                 && jobs >= 36
                 && employed >= 30
+                && prosperity >= 50
                 && diversified) {
             return CITY;
         }
 
         if (population >= 180
                 && jobs >= 12
-                && employed >= 10) {
+                && employed >= 10
+                && prosperity >= 25) {
             return TOWN;
         }
 

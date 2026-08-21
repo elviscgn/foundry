@@ -95,8 +95,8 @@ public final class SettlementScreen extends Screen {
         drawFinanceHeader(guiGraphics, financeX, top, halfWidth);
         drawFinanceGraph(guiGraphics, snapshot.financeHistory(), financeX, mainGraphY, halfWidth, mainHeight);
 
-        int miniGap = 10;
-        int miniWidth = (width - miniGap * 2) / 3;
+        int miniGap = 8;
+        int miniWidth = (width - miniGap * 3) / 4;
         drawFinanceTrendGraph(
                 guiGraphics,
                 snapshot.financeHistory(),
@@ -127,6 +127,18 @@ public final class SettlementScreen extends Screen {
                 guiGraphics,
                 snapshot.history(),
                 x + (miniWidth + miniGap) * 2,
+                miniLabelY,
+                bottom - miniHeight,
+                miniWidth,
+                miniHeight,
+                "PROSPERITY",
+                HistoryPointSnapshot::prosperity,
+                GOLD
+        );
+        drawTrendGraph(
+                guiGraphics,
+                snapshot.history(),
+                x + (miniWidth + miniGap) * 3,
                 miniLabelY,
                 bottom - miniHeight,
                 miniWidth,
@@ -183,7 +195,7 @@ public final class SettlementScreen extends Screen {
         offset += drawPair(
                 guiGraphics, x, width, y + offset, compact,
                 snapshot.settlementTier() + "  //  Territory " + snapshot.claimRadius() + " blocks", GOLD,
-                "Population " + snapshot.population() + "   Prosperity " + snapshot.prosperity(), TEXT
+                "Population " + snapshot.population() + "   Prosperity " + snapshot.prosperity() + "/100", TEXT
         );
         offset += drawPair(
                 guiGraphics, x, width, y + offset, compact,

@@ -1,12 +1,16 @@
 package dev.foundry.settlement;
 
+import dev.foundry.block.IndustryBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.HashMap;
@@ -214,6 +218,38 @@ public final class SettlementSavedData extends SavedData {
             setDirty();
         }
         return settlement;
+    }
+
+    public int getIndustryStaffingSignal(ResourceKey<Level> dimension, BlockPos industryPos) {
+        IndustrySite site = industrySitesByLocation.get(Settlement.locationKey(dimension, industryPos));
+        if (site == null) {
+            return 0;
+        }
+        Settlement settlement = settlementsById.get(site.settlementId());
+        return settlement == null ? 0 : settlement.getIndustryStaffingSignal(site.type());
+    }
+
+    public void refreshIndustrySignals(MinecraftServer server) {
+        for (IndustrySite site : industrySitesByLocation.values()) {
+            Settlement settlement = settlementsById.get(site.settlementId());
+            if (settlement == null) {
+                continue;
+            }
+
+            int staffing = settlement.getIndustryStaffingSignal(site.type());
+            BlockPos pos = BlockPos.of(site.pos());
+            for (ServerLevel level : server.getAllLevels()) {
+                if (!level.dimension().location().toString().equals(site.dimension()) || !level.hasChunkAt(pos)) {
+                    continue;
+                }
+
+                BlockState state = level.getBlockState(pos);
+                if (state.getBlock() instanceof IndustryBlock industryBlock) {
+                    industryBlock.syncStaffing(level, pos, staffing);
+                }
+                break;
+            }
+        }
     }
 
     public void removeIndustry(ResourceKey<Level> dimension, BlockPos industryPos) {

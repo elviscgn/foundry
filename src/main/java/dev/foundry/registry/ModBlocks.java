@@ -2,7 +2,9 @@ package dev.foundry.registry;
 
 import dev.foundry.Foundry;
 import dev.foundry.block.FreightDepotBlock;
+import dev.foundry.block.IndustryBlock;
 import dev.foundry.block.TownHallBlock;
+import dev.foundry.settlement.IndustryType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
@@ -23,6 +25,16 @@ public final class ModBlocks {
     public static final RegistryObject<Block> FREIGHT_DEPOT = BLOCKS.register(
             "freight_depot",
             () -> new FreightDepotBlock(BlockBehaviour.Properties.copy(Blocks.COPPER_BLOCK))
+    );
+
+    public static final RegistryObject<Block> BAKERY = BLOCKS.register(
+            "bakery",
+            () -> new IndustryBlock(BlockBehaviour.Properties.copy(Blocks.BRICKS), IndustryType.BAKERY)
+    );
+
+    public static final RegistryObject<Block> BRICKWORKS = BLOCKS.register(
+            "brickworks",
+            () -> new IndustryBlock(BlockBehaviour.Properties.copy(Blocks.DEEPSLATE_BRICKS), IndustryType.BRICKWORKS)
     );
 
     private ModBlocks() {

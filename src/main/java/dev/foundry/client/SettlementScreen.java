@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.List;
@@ -49,18 +50,18 @@ public final class SettlementScreen extends Screen {
         String title = innerWidth < 300 ? "FOUNDRY // LEDGER" : "FOUNDRY // TOWN HALL LEDGER";
         guiGraphics.drawString(font, Component.literal(title), innerX, titleY, GOLD);
 
-        String supplyState = snapshot.breadSupplied() >= snapshot.breadTarget() ? "SUPPLIED" : "SHORTAGE";
-        int supplyColor = snapshot.breadSupplied() >= snapshot.breadTarget() ? GREEN : RED;
-        int supplyX = panelX + panelWidth - padding - font.width(supplyState);
-        if (supplyX > innerX + font.width(title) + 8) {
-            guiGraphics.drawString(font, Component.literal(supplyState), supplyX, titleY, supplyColor);
+        String economyState = economyState();
+        int stateColor = economyStateColor();
+        int stateX = panelX + panelWidth - padding - font.width(economyState);
+        if (stateX > innerX + font.width(title) + 8) {
+            guiGraphics.drawString(font, Component.literal(economyState), stateX, titleY, stateColor);
         }
 
         int statsY = panelY + 31;
         boolean compactStats = innerWidth < 470;
-        drawStats(guiGraphics, innerX, innerWidth, statsY, compactStats);
+        int statsHeight = drawStats(guiGraphics, innerX, innerWidth, statsY, compactStats);
 
-        int contentTop = statsY + (compactStats ? 34 : 22);
+        int contentTop = statsY + statsHeight + 8;
         int contentBottom = panelY + panelHeight - padding;
         int availableHeight = Math.max(1, contentBottom - contentTop);
 
@@ -93,25 +94,54 @@ public final class SettlementScreen extends Screen {
         super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
 
-    private void drawStats(GuiGraphics guiGraphics, int x, int width, int y, boolean compact) {
+    private String economyState() {
+        if (snapshot.breadSupplied() < snapshot.breadTarget()) {
+            return "SHORTAGE";
+        }
+        if (snapshot.buildingMaterialsSupplied() < snapshot.buildingMaterialsTarget()) {
+            return "NEEDS BRICKS";
+        }
+        if (snapshot.growthReady()) {
+            return "GROWTH READY";
+        }
+        return "SUPPLIED";
+    }
+
+    private int economyStateColor() {
+        if (snapshot.breadSupplied() < snapshot.breadTarget()) {
+            return RED;
+        }
+        if (snapshot.buildingMaterialsSupplied() < snapshot.buildingMaterialsTarget()) {
+            return GOLD;
+        }
+        return GREEN;
+    }
+
+    private int drawStats(GuiGraphics guiGraphics, int x, int width, int y, boolean compact) {
         String population = "Population  " + snapshot.population();
         String prosperity = "Prosperity  " + snapshot.prosperity();
         String bread = "Bread  " + snapshot.breadSupplied() + "/" + snapshot.breadTarget()
                 + "   -" + snapshot.dailyBreadConsumption() + "/day";
-
-        if (compact) {
-            guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
-            int prosperityX = x + width - font.width(prosperity);
-            if (prosperityX > x + font.width(population) + 8) {
-                guiGraphics.drawString(font, Component.literal(prosperity), prosperityX, y, TEXT);
-            }
-            guiGraphics.drawString(font, Component.literal(bread), x, y + 14, TEXT);
-            return;
-        }
+        String bricks = "Bricks  " + snapshot.buildingMaterialsSupplied() + "/" + snapshot.buildingMaterialsTarget();
 
         guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
-        guiGraphics.drawCenteredString(font, Component.literal(prosperity), x + width / 2, y, TEXT);
-        guiGraphics.drawString(font, Component.literal(bread), x + width - font.width(bread), y, TEXT);
+        int prosperityX = x + width - font.width(prosperity);
+        if (prosperityX > x + font.width(population) + 8) {
+            guiGraphics.drawString(font, Component.literal(prosperity), prosperityX, y, TEXT);
+        }
+
+        int breadColor = snapshot.breadSupplied() >= snapshot.breadTarget() ? GREEN : TEXT;
+        int brickColor = snapshot.buildingMaterialsSupplied() >= snapshot.buildingMaterialsTarget() ? GREEN : TEXT;
+        guiGraphics.drawString(font, Component.literal(bread), x, y + 14, breadColor);
+
+        int bricksX = x + width - font.width(bricks);
+        if (bricksX > x + font.width(bread) + 8) {
+            guiGraphics.drawString(font, Component.literal(bricks), bricksX, y + 14, brickColor);
+            return 28;
+        }
+
+        guiGraphics.drawString(font, Component.literal(bricks), x, y + 28, brickColor);
+        return 42;
     }
 
     private void drawBreadHeader(GuiGraphics guiGraphics, int x, int y, int width) {

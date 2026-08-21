@@ -56,7 +56,7 @@ public final class FreightDepotBlockEntity extends BlockEntity {
 
         @Override
         public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
-            if (slot != 0 || stack.isEmpty() || !stack.is(Items.BREAD)) {
+            if (slot != 0 || stack.isEmpty() || !isAcceptedCommodity(stack)) {
                 return stack;
             }
 
@@ -73,14 +73,14 @@ public final class FreightDepotBlockEntity extends BlockEntity {
                 return stack;
             }
 
-            int capacity = Math.max(0, settlement.getBreadTarget() - settlement.getBreadSupplied());
+            int capacity = remainingCapacity(settlement, stack);
             int accepted = Math.min(capacity, stack.getCount());
             if (accepted <= 0) {
                 return stack;
             }
 
             if (!simulate) {
-                accepted = settlement.deliverBread(accepted);
+                accepted = deliver(settlement, stack, accepted);
                 if (accepted > 0) {
                     savedData.setDirty();
                 }
@@ -89,6 +89,30 @@ public final class FreightDepotBlockEntity extends BlockEntity {
             ItemStack remainder = stack.copy();
             remainder.shrink(accepted);
             return remainder;
+        }
+
+        private boolean isAcceptedCommodity(ItemStack stack) {
+            return stack.is(Items.BREAD) || stack.is(Items.BRICK);
+        }
+
+        private int remainingCapacity(Settlement settlement, ItemStack stack) {
+            if (stack.is(Items.BREAD)) {
+                return Math.max(0, settlement.getBreadTarget() - settlement.getBreadSupplied());
+            }
+            if (stack.is(Items.BRICK)) {
+                return Math.max(0, settlement.getBuildingMaterialsTarget() - settlement.getBuildingMaterialsSupplied());
+            }
+            return 0;
+        }
+
+        private int deliver(Settlement settlement, ItemStack stack, int offered) {
+            if (stack.is(Items.BREAD)) {
+                return settlement.deliverBread(offered);
+            }
+            if (stack.is(Items.BRICK)) {
+                return settlement.deliverBuildingMaterials(offered);
+            }
+            return 0;
         }
 
         @Override
@@ -103,7 +127,7 @@ public final class FreightDepotBlockEntity extends BlockEntity {
 
         @Override
         public boolean isItemValid(int slot, ItemStack stack) {
-            return slot == 0 && stack.is(Items.BREAD);
+            return slot == 0 && isAcceptedCommodity(stack);
         }
     }
 }

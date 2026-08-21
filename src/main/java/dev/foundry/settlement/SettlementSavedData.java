@@ -156,7 +156,16 @@ public final class SettlementSavedData extends SavedData {
             return 0L;
         }
 
-        if (currentDay <= lastProcessedDay) {
+        if (currentDay < lastProcessedDay) {
+            lastProcessedDay = currentDay;
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.resetHistory(currentDay);
+            }
+            setDirty();
+            return 0L;
+        }
+
+        if (currentDay == lastProcessedDay) {
             return 0L;
         }
 

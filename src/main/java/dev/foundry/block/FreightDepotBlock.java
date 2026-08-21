@@ -1,5 +1,6 @@
 package dev.foundry.block;
 
+import dev.foundry.block.entity.FreightDepotBlockEntity;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
@@ -13,13 +14,25 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
-public final class FreightDepotBlock extends Block {
+public final class FreightDepotBlock extends BaseEntityBlock {
     public FreightDepotBlock(Properties properties) {
         super(properties);
+    }
+
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new FreightDepotBlockEntity(pos, state);
+    }
+
+    @Override
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
     }
 
     @Override
@@ -88,7 +101,7 @@ public final class FreightDepotBlock extends Block {
 
         return Component.literal("Freight Depot | Accepted " + accepted + " bread | ")
                 .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + Settlement.BREAD_TARGET + " | "))
+                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget() + " | "))
                 .append(Component.literal(supplyState).withStyle(stateColor))
                 .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }
@@ -99,7 +112,8 @@ public final class FreightDepotBlock extends Block {
 
         return Component.literal("Freight Depot | Linked | Bread: ")
                 .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + Settlement.BREAD_TARGET))
+                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
+                .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(" | " + supplyState).withStyle(stateColor))
                 .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }

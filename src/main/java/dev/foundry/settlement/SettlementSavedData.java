@@ -18,11 +18,14 @@ public final class SettlementSavedData extends SavedData {
     private static final String DATA_NAME = "foundry_settlements";
     private static final String TAG_SETTLEMENTS = "Settlements";
     private static final String TAG_DEPOTS = "Depots";
+    private static final String TAG_LAST_PROCESSED_DAY = "LastProcessedDay";
     private static final int DEFAULT_DEPOT_LINK_RANGE = 128;
+    private static final long TICKS_PER_DAY = 24_000L;
 
     private final Map<UUID, Settlement> settlementsById = new HashMap<>();
     private final Map<String, UUID> settlementIdsByLocation = new HashMap<>();
     private final Map<String, DepotLink> depotLinksByLocation = new HashMap<>();
+    private long lastProcessedDay = -1L;
 
     public static SettlementSavedData get(ServerLevel level) {
         ServerLevel overworld = level.getServer().overworld();
@@ -51,6 +54,10 @@ public final class SettlementSavedData extends SavedData {
             }
         }
 
+        if (tag.contains(TAG_LAST_PROCESSED_DAY, Tag.TAG_LONG)) {
+            data.lastProcessedDay = tag.getLong(TAG_LAST_PROCESSED_DAY);
+        }
+
         return data;
     }
 
@@ -65,6 +72,9 @@ public final class SettlementSavedData extends SavedData {
         }
 
         Settlement settlement = Settlement.create(dimension, pos);
+        if (lastProcessedDay >= 0L) {
+            settlement.recordHistory(lastProcessedDay);
+        }
         settlementsById.put(settlement.getId(), settlement);
         settlementIdsByLocation.put(locationKey, settlement.getId());
         setDirty();
@@ -135,6 +145,42 @@ public final class SettlementSavedData extends SavedData {
         }
     }
 
+    public long advanceEconomy(long dayTime) {
+        long currentDay = Math.floorDiv(dayTime, TICKS_PER_DAY);
+        if (lastProcessedDay < 0L) {
+            lastProcessedDay = currentDay;
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.recordHistory(currentDay);
+            }
+            setDirty();
+            return 0L;
+        }
+
+        if (currentDay <= lastProcessedDay) {
+            return 0L;
+        }
+
+        long daysElapsed = currentDay - lastProcessedDay;
+        long skippedDays = Math.max(0L, daysElapsed - Settlement.HISTORY_LIMIT);
+        if (skippedDays > 0L) {
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.consumeBreadForDays(skippedDays);
+            }
+        }
+
+        long firstRecordedDay = lastProcessedDay + skippedDays + 1L;
+        for (long day = firstRecordedDay; day <= currentDay; day++) {
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.consumeBreadForDays(1L);
+                settlement.recordHistory(day);
+            }
+        }
+
+        lastProcessedDay = currentDay;
+        setDirty();
+        return daysElapsed;
+    }
+
     private Settlement findNearestSettlement(ResourceKey<Level> dimension, BlockPos pos, int maxDistance) {
         Settlement nearest = null;
         double nearestDistance = (double) maxDistance * maxDistance;
@@ -167,6 +213,7 @@ public final class SettlementSavedData extends SavedData {
             depots.add(depotLink.save());
         }
         tag.put(TAG_DEPOTS, depots);
+        tag.putLong(TAG_LAST_PROCESSED_DAY, lastProcessedDay);
         return tag;
     }
 

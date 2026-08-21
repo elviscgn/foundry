@@ -72,6 +72,9 @@ public final class SettlementSavedData extends SavedData {
         }
 
         Settlement settlement = Settlement.create(dimension, pos);
+        if (lastProcessedDay >= 0L) {
+            settlement.recordHistory(lastProcessedDay);
+        }
         settlementsById.put(settlement.getId(), settlement);
         settlementIdsByLocation.put(locationKey, settlement.getId());
         setDirty();
@@ -146,6 +149,9 @@ public final class SettlementSavedData extends SavedData {
         long currentDay = Math.floorDiv(dayTime, TICKS_PER_DAY);
         if (lastProcessedDay < 0L) {
             lastProcessedDay = currentDay;
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.recordHistory(currentDay);
+            }
             setDirty();
             return 0L;
         }
@@ -155,8 +161,19 @@ public final class SettlementSavedData extends SavedData {
         }
 
         long daysElapsed = currentDay - lastProcessedDay;
-        for (Settlement settlement : settlementsById.values()) {
-            settlement.consumeBreadForDays(daysElapsed);
+        long skippedDays = Math.max(0L, daysElapsed - Settlement.HISTORY_LIMIT);
+        if (skippedDays > 0L) {
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.consumeBreadForDays(skippedDays);
+            }
+        }
+
+        long firstRecordedDay = lastProcessedDay + skippedDays + 1L;
+        for (long day = firstRecordedDay; day <= currentDay; day++) {
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.consumeBreadForDays(1L);
+                settlement.recordHistory(day);
+            }
         }
 
         lastProcessedDay = currentDay;

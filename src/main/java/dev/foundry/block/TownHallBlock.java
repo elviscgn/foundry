@@ -1,11 +1,11 @@
 package dev.foundry.block;
 
+import dev.foundry.network.FoundryNetwork;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
-import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
@@ -37,13 +37,13 @@ public final class TownHallBlock extends Block {
             return InteractionResult.SUCCESS;
         }
 
-        if (!(level instanceof ServerLevel serverLevel)) {
+        if (!(level instanceof ServerLevel serverLevel) || !(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResult.CONSUME;
         }
 
         Settlement settlement = SettlementSavedData.get(serverLevel)
                 .getOrCreate(serverLevel.dimension(), pos);
-        player.displayClientMessage(statusMessage(settlement), false);
+        FoundryNetwork.sendSettlementSnapshot(serverPlayer, settlement);
         return InteractionResult.CONSUME;
     }
 
@@ -53,22 +53,5 @@ public final class TownHallBlock extends Block {
             SettlementSavedData.get(serverLevel).remove(serverLevel.dimension(), pos);
         }
         super.onRemove(state, level, pos, newState, isMoving);
-    }
-
-    private static Component statusMessage(Settlement settlement) {
-        String supplyState = settlement.isSupplied() ? "SUPPLIED" : "NEEDS BREAD";
-        ChatFormatting stateColor = settlement.isSupplied() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
-
-        Component message = Component.literal("Town Hall | Population: " + settlement.getPopulation() + " | Bread: ")
-                .withStyle(ChatFormatting.GOLD)
-                .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
-                .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(" | " + supplyState).withStyle(stateColor))
-                .append(Component.literal(" | Prosperity: " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
-
-        if (!settlement.isSupplied()) {
-            message = message.copy().append(Component.literal(" | Deliver at Freight Depot").withStyle(ChatFormatting.GRAY));
-        }
-        return message;
     }
 }

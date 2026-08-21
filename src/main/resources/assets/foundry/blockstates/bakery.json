@@ -1,7 +1,9 @@
 {
-  "variants": {
-    "": {
-      "model": "foundry:block/bakery"
+  "multipart": [
+    {
+      "apply": {
+        "model": "foundry:block/bakery"
+      }
     }
-  }
+  ]
 }

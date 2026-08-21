@@ -31,6 +31,8 @@ public final class SettlementEvents {
             return;
         }
 
-        SettlementSavedData.get(overworld).advanceEconomy(overworld.getDayTime());
+        SettlementSavedData data = SettlementSavedData.get(overworld);
+        data.advanceEconomy(overworld.getDayTime());
+        data.refreshIndustrySignals(server);
     }
 }

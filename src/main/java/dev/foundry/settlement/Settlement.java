@@ -275,6 +275,34 @@ public final class Settlement {
         return Math.min(constructionJobCapacity, remainingWorkforce);
     }
 
+    public int getIndustryJobCapacity(IndustryType type) {
+        return type == IndustryType.BAKERY ? getFoodJobCapacity() : getConstructionJobCapacity();
+    }
+
+    public int getIndustryEmployed(IndustryType type) {
+        return type == IndustryType.BAKERY ? getFoodEmployed() : getConstructionEmployed();
+    }
+
+    public int getIndustryStaffingPercent(IndustryType type) {
+        int jobs = getIndustryJobCapacity(type);
+        if (jobs <= 0) {
+            return 0;
+        }
+        return Math.min(100, getIndustryEmployed(type) * 100 / jobs);
+    }
+
+    public int getIndustryStaffingSignal(IndustryType type) {
+        int jobs = getIndustryJobCapacity(type);
+        int employed = getIndustryEmployed(type);
+        if (jobs <= 0 || employed <= 0) {
+            return 0;
+        }
+        if (employed >= jobs) {
+            return 15;
+        }
+        return Math.max(1, employed * 15 / jobs);
+    }
+
     void setIndustryJobCapacity(int foodJobCapacity, int constructionJobCapacity) {
         this.foodJobCapacity = Math.max(0, foodJobCapacity);
         this.constructionJobCapacity = Math.max(0, constructionJobCapacity);

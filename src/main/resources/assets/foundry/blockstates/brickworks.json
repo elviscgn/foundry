@@ -1,7 +1,9 @@
 {
-  "variants": {
-    "": {
-      "model": "foundry:block/brickworks"
+  "multipart": [
+    {
+      "apply": {
+        "model": "foundry:block/brickworks"
+      }
     }
-  }
+  ]
 }

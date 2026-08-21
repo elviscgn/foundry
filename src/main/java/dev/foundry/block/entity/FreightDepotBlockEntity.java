@@ -1,13 +1,21 @@
 package dev.foundry.block.entity;
 
+import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
 import dev.foundry.registry.ModBlockEntities;
+import dev.foundry.registry.ModItems;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.common.capabilities.Capability;
@@ -15,12 +23,198 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
 
-public final class FreightDepotBlockEntity extends BlockEntity {
+import java.util.List;
+
+public final class FreightDepotBlockEntity extends BlockEntity implements IHaveGoggleInformation {
+    private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
+    private static final String TAG_POPULATION = "SyncedPopulation";
+    private static final String TAG_PROSPERITY = "SyncedProsperity";
+    private static final String TAG_BREAD_SUPPLIED = "SyncedBreadSupplied";
+    private static final String TAG_BREAD_TARGET = "SyncedBreadTarget";
+    private static final String TAG_DAILY_BREAD = "SyncedDailyBread";
+    private static final String TAG_MATERIALS_SUPPLIED = "SyncedMaterialsSupplied";
+    private static final String TAG_MATERIALS_TARGET = "SyncedMaterialsTarget";
+    private static final String TAG_GROWTH_READY = "SyncedGrowthReady";
+
     private final IItemHandler depotItemHandler = new DepotItemHandler();
     private LazyOptional<IItemHandler> itemHandlerCapability = LazyOptional.of(() -> depotItemHandler);
 
+    private boolean settlementLinked;
+    private int syncedPopulation;
+    private int syncedProsperity;
+    private int syncedBreadSupplied;
+    private int syncedBreadTarget;
+    private int syncedDailyBread;
+    private int syncedMaterialsSupplied;
+    private int syncedMaterialsTarget;
+    private boolean syncedGrowthReady;
+
     public FreightDepotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.FREIGHT_DEPOT.get(), pos, state);
+    }
+
+    public static void serverTick(Level level, BlockPos pos, BlockState state, FreightDepotBlockEntity blockEntity) {
+        if (level.isClientSide || level.getGameTime() % 10L != 0L) {
+            return;
+        }
+        blockEntity.refreshGoggleState();
+    }
+
+    public void refreshGoggleState() {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        SettlementSavedData savedData = SettlementSavedData.get(serverLevel);
+        Settlement settlement = savedData.getSettlementForDepot(serverLevel.dimension(), worldPosition);
+        if (settlement == null) {
+            settlement = savedData.linkDepot(serverLevel.dimension(), worldPosition);
+        }
+
+        boolean changed;
+        if (settlement == null) {
+            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false);
+        } else {
+            changed = applySnapshot(
+                    true,
+                    settlement.getPopulation(),
+                    settlement.getProsperity(),
+                    settlement.getBreadSupplied(),
+                    settlement.getBreadTarget(),
+                    settlement.getDailyBreadConsumption(),
+                    settlement.getBuildingMaterialsSupplied(),
+                    settlement.getBuildingMaterialsTarget(),
+                    settlement.isGrowthReady()
+            );
+        }
+
+        if (changed) {
+            setChanged();
+            BlockState state = getBlockState();
+            serverLevel.sendBlockUpdated(worldPosition, state, state, Block.UPDATE_CLIENTS);
+        }
+    }
+
+    private boolean applySnapshot(boolean linked, int population, int prosperity,
+                                  int breadSupplied, int breadTarget, int dailyBread,
+                                  int materialsSupplied, int materialsTarget, boolean growthReady) {
+        boolean changed = settlementLinked != linked
+                || syncedPopulation != population
+                || syncedProsperity != prosperity
+                || syncedBreadSupplied != breadSupplied
+                || syncedBreadTarget != breadTarget
+                || syncedDailyBread != dailyBread
+                || syncedMaterialsSupplied != materialsSupplied
+                || syncedMaterialsTarget != materialsTarget
+                || syncedGrowthReady != growthReady;
+
+        settlementLinked = linked;
+        syncedPopulation = population;
+        syncedProsperity = prosperity;
+        syncedBreadSupplied = breadSupplied;
+        syncedBreadTarget = breadTarget;
+        syncedDailyBread = dailyBread;
+        syncedMaterialsSupplied = materialsSupplied;
+        syncedMaterialsTarget = materialsTarget;
+        syncedGrowthReady = growthReady;
+        return changed;
+    }
+
+    @Override
+    public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
+        tooltip.add(Component.literal("Freight Depot").withStyle(ChatFormatting.GOLD));
+
+        if (!settlementLinked) {
+            tooltip.add(Component.literal("  No linked settlement").withStyle(ChatFormatting.RED));
+            tooltip.add(Component.literal("  Town Hall required within 128 blocks")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+            return true;
+        }
+
+        tooltip.add(Component.literal("  Linked settlement").withStyle(ChatFormatting.GREEN));
+        tooltip.add(valueLine("Population", syncedPopulation, ChatFormatting.AQUA));
+        tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget).copy()
+                .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
+        tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
+        tooltip.add(valueLine("Prosperity", syncedProsperity, ChatFormatting.GOLD));
+
+        Component growth;
+        if (syncedGrowthReady) {
+            growth = Component.literal("  Growth: READY").withStyle(ChatFormatting.GREEN);
+        } else if (syncedBreadSupplied < syncedBreadTarget) {
+            growth = Component.literal("  Growth: FOOD SHORTAGE").withStyle(ChatFormatting.RED);
+        } else if (syncedMaterialsSupplied < syncedMaterialsTarget) {
+            growth = Component.literal("  Growth: NEEDS BRICKS").withStyle(ChatFormatting.YELLOW);
+        } else if (syncedProsperity < Settlement.GROWTH_PROSPERITY_THRESHOLD) {
+            growth = Component.literal("  Growth: Prosperity " + syncedProsperity + "/"
+                    + Settlement.GROWTH_PROSPERITY_THRESHOLD).withStyle(ChatFormatting.YELLOW);
+        } else {
+            growth = Component.literal("  Growth: STABLE").withStyle(ChatFormatting.GRAY);
+        }
+        tooltip.add(growth);
+        return true;
+    }
+
+    private static Component valueLine(String label, int value, ChatFormatting valueColor) {
+        return Component.literal("  " + label + ": ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(Integer.toString(value)).withStyle(valueColor));
+    }
+
+    private static Component stockLine(String label, int supplied, int target) {
+        ChatFormatting valueColor = supplied >= target ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
+        return Component.literal("  " + label + ": ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(supplied + "/" + target).withStyle(valueColor));
+    }
+
+    @Override
+    public ItemStack getIcon(boolean isPlayerSneaking) {
+        return ModItems.FREIGHT_DEPOT.get().getDefaultInstance();
+    }
+
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        writeSnapshot(tag);
+    }
+
+    @Override
+    public void load(CompoundTag tag) {
+        super.load(tag);
+        readSnapshot(tag);
+    }
+
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public CompoundTag getUpdateTag() {
+        return saveWithoutMetadata();
+    }
+
+    private void writeSnapshot(CompoundTag tag) {
+        tag.putBoolean(TAG_SETTLEMENT_LINKED, settlementLinked);
+        tag.putInt(TAG_POPULATION, syncedPopulation);
+        tag.putInt(TAG_PROSPERITY, syncedProsperity);
+        tag.putInt(TAG_BREAD_SUPPLIED, syncedBreadSupplied);
+        tag.putInt(TAG_BREAD_TARGET, syncedBreadTarget);
+        tag.putInt(TAG_DAILY_BREAD, syncedDailyBread);
+        tag.putInt(TAG_MATERIALS_SUPPLIED, syncedMaterialsSupplied);
+        tag.putInt(TAG_MATERIALS_TARGET, syncedMaterialsTarget);
+        tag.putBoolean(TAG_GROWTH_READY, syncedGrowthReady);
+    }
+
+    private void readSnapshot(CompoundTag tag) {
+        settlementLinked = tag.getBoolean(TAG_SETTLEMENT_LINKED);
+        syncedPopulation = tag.getInt(TAG_POPULATION);
+        syncedProsperity = tag.getInt(TAG_PROSPERITY);
+        syncedBreadSupplied = tag.getInt(TAG_BREAD_SUPPLIED);
+        syncedBreadTarget = tag.getInt(TAG_BREAD_TARGET);
+        syncedDailyBread = tag.getInt(TAG_DAILY_BREAD);
+        syncedMaterialsSupplied = tag.getInt(TAG_MATERIALS_SUPPLIED);
+        syncedMaterialsTarget = tag.getInt(TAG_MATERIALS_TARGET);
+        syncedGrowthReady = tag.getBoolean(TAG_GROWTH_READY);
     }
 
     @Override
@@ -70,6 +264,7 @@ public final class FreightDepotBlockEntity extends BlockEntity {
                 settlement = savedData.linkDepot(serverLevel.dimension(), worldPosition);
             }
             if (settlement == null) {
+                refreshGoggleState();
                 return stack;
             }
 
@@ -83,6 +278,7 @@ public final class FreightDepotBlockEntity extends BlockEntity {
                 accepted = deliver(settlement, stack, accepted);
                 if (accepted > 0) {
                     savedData.setDirty();
+                    refreshGoggleState();
                 }
             }
 

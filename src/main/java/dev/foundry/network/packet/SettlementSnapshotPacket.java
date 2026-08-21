@@ -21,6 +21,10 @@ public record SettlementSnapshotPacket(
         int constructionJobs,
         int constructionEmployed,
         String laborPriority,
+        int foodOutputToday,
+        int foodOutputAverage7d,
+        int constructionOutputToday,
+        int constructionOutputAverage7d,
         int breadSupplied,
         int breadTarget,
         int dailyBreadConsumption,
@@ -55,6 +59,10 @@ public record SettlementSnapshotPacket(
                 settlement.getConstructionJobCapacity(),
                 settlement.getConstructionEmployed(),
                 settlement.getLaborPriority().displayName(),
+                settlement.getFoodOutputToday(),
+                settlement.getFoodOutputAverage(7),
+                settlement.getConstructionOutputToday(),
+                settlement.getConstructionOutputAverage(7),
                 settlement.getBreadSupplied(),
                 settlement.getBreadTarget(),
                 settlement.getDailyBreadConsumption(),
@@ -78,6 +86,10 @@ public record SettlementSnapshotPacket(
         buffer.writeVarInt(packet.constructionJobs);
         buffer.writeVarInt(packet.constructionEmployed);
         buffer.writeUtf(packet.laborPriority, 32);
+        buffer.writeVarInt(packet.foodOutputToday);
+        buffer.writeVarInt(packet.foodOutputAverage7d);
+        buffer.writeVarInt(packet.constructionOutputToday);
+        buffer.writeVarInt(packet.constructionOutputAverage7d);
         buffer.writeVarInt(packet.breadSupplied);
         buffer.writeVarInt(packet.breadTarget);
         buffer.writeVarInt(packet.dailyBreadConsumption);
@@ -110,6 +122,10 @@ public record SettlementSnapshotPacket(
         int constructionJobs = buffer.readVarInt();
         int constructionEmployed = buffer.readVarInt();
         String laborPriority = buffer.readUtf(32);
+        int foodOutputToday = buffer.readVarInt();
+        int foodOutputAverage7d = buffer.readVarInt();
+        int constructionOutputToday = buffer.readVarInt();
+        int constructionOutputAverage7d = buffer.readVarInt();
         int breadSupplied = buffer.readVarInt();
         int breadTarget = buffer.readVarInt();
         int dailyBreadConsumption = buffer.readVarInt();
@@ -144,6 +160,10 @@ public record SettlementSnapshotPacket(
                 constructionJobs,
                 constructionEmployed,
                 laborPriority,
+                foodOutputToday,
+                foodOutputAverage7d,
+                constructionOutputToday,
+                constructionOutputAverage7d,
                 breadSupplied,
                 breadTarget,
                 dailyBreadConsumption,

@@ -6,6 +6,7 @@ import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModItems;
+import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
@@ -28,6 +29,7 @@ import net.minecraftforge.items.IItemHandler;
 import java.util.List;
 
 public final class FreightDepotBlockEntity extends SmartBlockEntity implements IHaveGoggleInformation {
+    private static final long TICKS_PER_DAY = 24_000L;
     private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
     private static final String TAG_POPULATION = "SyncedPopulation";
     private static final String TAG_PROSPERITY = "SyncedProsperity";
@@ -37,6 +39,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private static final String TAG_MATERIALS_SUPPLIED = "SyncedMaterialsSupplied";
     private static final String TAG_MATERIALS_TARGET = "SyncedMaterialsTarget";
     private static final String TAG_GROWTH_READY = "SyncedGrowthReady";
+    private static final String TAG_FOOD_OUTPUT_TODAY = "SyncedFoodOutputToday";
+    private static final String TAG_CONSTRUCTION_OUTPUT_TODAY = "SyncedConstructionOutputToday";
+    private static final String TAG_FOOD_OUTPUT_AVERAGE = "SyncedFoodOutputAverage";
+    private static final String TAG_CONSTRUCTION_OUTPUT_AVERAGE = "SyncedConstructionOutputAverage";
 
     private final IItemHandler depotItemHandler = new DepotItemHandler();
     private LazyOptional<IItemHandler> itemHandlerCapability = LazyOptional.of(() -> depotItemHandler);
@@ -50,6 +56,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private int syncedMaterialsSupplied;
     private int syncedMaterialsTarget;
     private boolean syncedGrowthReady;
+    private int syncedFoodOutputToday;
+    private int syncedConstructionOutputToday;
+    private int syncedFoodOutputAverage;
+    private int syncedConstructionOutputAverage;
 
     public FreightDepotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.FREIGHT_DEPOT.get(), pos, state);
@@ -84,7 +94,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         boolean changed;
         if (settlement == null) {
-            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false);
+            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false, 0, 0, 0, 0);
         } else {
             changed = applySnapshot(
                     true,
@@ -95,7 +105,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                     settlement.getDailyBreadConsumption(),
                     settlement.getBuildingMaterialsSupplied(),
                     settlement.getBuildingMaterialsTarget(),
-                    settlement.isGrowthReady()
+                    settlement.isGrowthReady(),
+                    settlement.getFoodOutputToday(),
+                    settlement.getConstructionOutputToday(),
+                    settlement.getFoodOutputAverage(7),
+                    settlement.getConstructionOutputAverage(7)
             );
         }
 
@@ -108,7 +122,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
     private boolean applySnapshot(boolean linked, int population, int prosperity,
                                   int breadSupplied, int breadTarget, int dailyBread,
-                                  int materialsSupplied, int materialsTarget, boolean growthReady) {
+                                  int materialsSupplied, int materialsTarget, boolean growthReady,
+                                  int foodOutputToday, int constructionOutputToday,
+                                  int foodOutputAverage, int constructionOutputAverage) {
         boolean changed = settlementLinked != linked
                 || syncedPopulation != population
                 || syncedProsperity != prosperity
@@ -117,7 +133,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 || syncedDailyBread != dailyBread
                 || syncedMaterialsSupplied != materialsSupplied
                 || syncedMaterialsTarget != materialsTarget
-                || syncedGrowthReady != growthReady;
+                || syncedGrowthReady != growthReady
+                || syncedFoodOutputToday != foodOutputToday
+                || syncedConstructionOutputToday != constructionOutputToday
+                || syncedFoodOutputAverage != foodOutputAverage
+                || syncedConstructionOutputAverage != constructionOutputAverage;
 
         settlementLinked = linked;
         syncedPopulation = population;
@@ -128,6 +148,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedMaterialsSupplied = materialsSupplied;
         syncedMaterialsTarget = materialsTarget;
         syncedGrowthReady = growthReady;
+        syncedFoodOutputToday = foodOutputToday;
+        syncedConstructionOutputToday = constructionOutputToday;
+        syncedFoodOutputAverage = foodOutputAverage;
+        syncedConstructionOutputAverage = constructionOutputAverage;
         return changed;
     }
 
@@ -148,6 +172,15 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
         tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
         tooltip.add(valueLine("Prosperity", syncedProsperity, ChatFormatting.GOLD));
+        tooltip.add(Component.literal("  Measured output today: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("Food " + syncedFoodOutputToday).withStyle(ChatFormatting.GREEN))
+                .append(Component.literal("  Construction " + syncedConstructionOutputToday)
+                        .withStyle(ChatFormatting.AQUA)));
+        tooltip.add(Component.literal("  7d output avg: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("Food " + syncedFoodOutputAverage + "/day")
+                        .withStyle(ChatFormatting.GREEN))
+                .append(Component.literal("  Construction " + syncedConstructionOutputAverage + "/day")
+                        .withStyle(ChatFormatting.AQUA)));
 
         Component growth;
         if (syncedGrowthReady) {
@@ -214,6 +247,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         tag.putInt(TAG_MATERIALS_SUPPLIED, syncedMaterialsSupplied);
         tag.putInt(TAG_MATERIALS_TARGET, syncedMaterialsTarget);
         tag.putBoolean(TAG_GROWTH_READY, syncedGrowthReady);
+        tag.putInt(TAG_FOOD_OUTPUT_TODAY, syncedFoodOutputToday);
+        tag.putInt(TAG_CONSTRUCTION_OUTPUT_TODAY, syncedConstructionOutputToday);
+        tag.putInt(TAG_FOOD_OUTPUT_AVERAGE, syncedFoodOutputAverage);
+        tag.putInt(TAG_CONSTRUCTION_OUTPUT_AVERAGE, syncedConstructionOutputAverage);
     }
 
     private void readSnapshot(CompoundTag tag) {
@@ -226,6 +263,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedMaterialsSupplied = tag.getInt(TAG_MATERIALS_SUPPLIED);
         syncedMaterialsTarget = tag.getInt(TAG_MATERIALS_TARGET);
         syncedGrowthReady = tag.getBoolean(TAG_GROWTH_READY);
+        syncedFoodOutputToday = tag.getInt(TAG_FOOD_OUTPUT_TODAY);
+        syncedConstructionOutputToday = tag.getInt(TAG_CONSTRUCTION_OUTPUT_TODAY);
+        syncedFoodOutputAverage = tag.getInt(TAG_FOOD_OUTPUT_AVERAGE);
+        syncedConstructionOutputAverage = tag.getInt(TAG_CONSTRUCTION_OUTPUT_AVERAGE);
     }
 
     @Override
@@ -246,6 +287,16 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     public void reviveCaps() {
         super.reviveCaps();
         itemHandlerCapability = LazyOptional.of(() -> depotItemHandler);
+    }
+
+    private static IndustryType industryTypeFor(ItemStack stack) {
+        if (stack.is(Items.BREAD)) {
+            return IndustryType.BAKERY;
+        }
+        if (stack.is(Items.BRICK)) {
+            return IndustryType.BRICKWORKS;
+        }
+        return null;
     }
 
     private final class DepotItemHandler implements IItemHandler {
@@ -288,6 +339,15 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
             if (!simulate) {
                 accepted = deliver(settlement, stack, accepted);
                 if (accepted > 0) {
+                    IndustryType industryType = industryTypeFor(stack);
+                    long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
+                    savedData.recordIndustryOutputForDepot(
+                            serverLevel.dimension(),
+                            worldPosition,
+                            industryType,
+                            accepted,
+                            currentDay
+                    );
                     savedData.setDirty();
                     refreshGoggleState();
                 }

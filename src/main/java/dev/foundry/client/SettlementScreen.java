@@ -130,6 +130,10 @@ public final class SettlementScreen extends Screen {
         String vacant = "Vacant  " + vacancies;
         String sectors = "Food " + snapshot.foodEmployed() + "/" + snapshot.foodJobs()
                 + "   Construction " + snapshot.constructionEmployed() + "/" + snapshot.constructionJobs();
+        String foodOutput = "Food output  " + snapshot.foodOutputToday() + " today  "
+                + snapshot.foodOutputAverage7d() + "/day 7d";
+        String constructionOutput = "Construction output  " + snapshot.constructionOutputToday() + " today  "
+                + snapshot.constructionOutputAverage7d() + "/day 7d";
 
         int row = 0;
         guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
@@ -179,6 +183,19 @@ public final class SettlementScreen extends Screen {
         row += 14;
         guiGraphics.drawString(font, Component.literal(sectors), x, y + row,
                 snapshot.employed() > 0 ? STEEL : MUTED_TEXT);
+
+        row += 14;
+        guiGraphics.drawString(font, Component.literal(foodOutput), x, y + row,
+                snapshot.foodOutputToday() > 0 ? GREEN : MUTED_TEXT);
+        int constructionOutputX = x + width - font.width(constructionOutput);
+        if (!compact && constructionOutputX > x + font.width(foodOutput) + 8) {
+            guiGraphics.drawString(font, Component.literal(constructionOutput), constructionOutputX, y + row,
+                    snapshot.constructionOutputToday() > 0 ? STEEL : MUTED_TEXT);
+        } else {
+            row += 14;
+            guiGraphics.drawString(font, Component.literal(constructionOutput), x, y + row,
+                    snapshot.constructionOutputToday() > 0 ? STEEL : MUTED_TEXT);
+        }
         return row + 14;
     }
 

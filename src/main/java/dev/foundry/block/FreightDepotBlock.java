@@ -93,6 +93,25 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         }
 
         ItemStack heldStack = player.getItemInHand(hand);
+        if (player.isShiftKeyDown() && heldStack.isEmpty()) {
+            SettlementSavedData.IndustryLinkResult result = savedData.completeIndustryDepotLink(
+                    player.getUUID(),
+                    serverLevel.dimension(),
+                    pos
+            );
+            if (result.handled()) {
+                player.displayClientMessage(
+                        Component.literal(result.message())
+                                .withStyle(result.success() ? ChatFormatting.GREEN : ChatFormatting.RED),
+                        false
+                );
+                if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+                    depot.refreshGoggleState();
+                }
+                return InteractionResult.CONSUME;
+            }
+        }
+
         int accepted = 0;
         String commodity = null;
 

@@ -22,6 +22,7 @@ import net.minecraft.world.phys.BlockHitResult;
 
 public final class IndustryBlock extends Block {
     public static final IntegerProperty STAFFING = IntegerProperty.create("staffing", 0, 15);
+    private static final long TICKS_PER_DAY = 24_000L;
 
     private final IndustryType industryType;
 
@@ -59,8 +60,19 @@ public final class IndustryBlock extends Block {
             return InteractionResult.CONSUME;
         }
 
-        Settlement settlement = SettlementSavedData.get(serverLevel)
-                .registerIndustry(serverLevel.dimension(), pos, industryType);
+        SettlementSavedData savedData = SettlementSavedData.get(serverLevel);
+        if (player.isShiftKeyDown() && player.getItemInHand(hand).isEmpty()) {
+            SettlementSavedData.IndustryLinkResult result = savedData.beginIndustryDepotLink(
+                    player.getUUID(),
+                    serverLevel.dimension(),
+                    pos,
+                    industryType
+            );
+            player.displayClientMessage(Component.literal(result.message()), true);
+            return InteractionResult.CONSUME;
+        }
+
+        Settlement settlement = savedData.registerIndustry(serverLevel.dimension(), pos, industryType);
         if (settlement == null) {
             syncStaffing(serverLevel, pos, 0);
             player.displayClientMessage(
@@ -76,14 +88,26 @@ public final class IndustryBlock extends Block {
         int staffingPercent = settlement.getIndustryStaffingPercent(industryType);
         syncStaffing(serverLevel, pos, staffingSignal);
 
+        long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
+        SettlementSavedData.IndustryTelemetry telemetry = savedData.getIndustryTelemetry(
+                serverLevel.dimension(),
+                pos,
+                currentDay
+        );
+
         String status = staffingSignal >= 15 ? "ACTIVE" : staffingSignal > 0 ? "UNDERSTAFFED" : "IDLE";
         String clutch = staffingSignal >= 15 ? "CLUTCH STOP OFF" : "CLUTCH STOP ON";
+        String line = telemetry.depotLinked() ? "LINE LINKED" : "LINE UNLINKED";
 
         player.displayClientMessage(
                 Component.literal(industryType.displayName()
                         + " // " + status
                         + " // " + industryType.sectorName() + " " + sectorEmployed + "/" + sectorJobs
                         + " staffed (" + staffingPercent + "%)"
+                        + " // " + line
+                        + " // Output " + telemetry.outputToday() + " today, "
+                        + telemetry.sectorAverage7d() + "/day 7d"
+                        + " // Lifetime " + telemetry.lifetimeOutput()
                         + " // " + clutch),
                 true
         );

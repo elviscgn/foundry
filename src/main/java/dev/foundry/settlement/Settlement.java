@@ -33,11 +33,13 @@ public final class Settlement {
     private static final String TAG_CONSTRUCTION_JOB_CAPACITY = "ConstructionJobCapacity";
     private static final String TAG_LABOR_PRIORITY = "LaborPriority";
     private static final String TAG_HISTORY = "History";
+    private static final String TAG_PRODUCTION_HISTORY = "ProductionHistory";
 
     private final UUID id;
     private final String dimension;
     private final long townHallPos;
     private final List<HistoryPoint> history;
+    private final List<ProductionPoint> productionHistory;
     private int population;
     private int breadSupplied;
     private int buildingMaterialsSupplied;
@@ -48,7 +50,8 @@ public final class Settlement {
 
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
                        int buildingMaterialsSupplied, int prosperity, int foodJobCapacity,
-                       int constructionJobCapacity, LaborPriority laborPriority, List<HistoryPoint> history) {
+                       int constructionJobCapacity, LaborPriority laborPriority, List<HistoryPoint> history,
+                       List<ProductionPoint> productionHistory) {
         this.id = id;
         this.dimension = dimension;
         this.townHallPos = townHallPos;
@@ -60,7 +63,9 @@ public final class Settlement {
         this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
         this.laborPriority = laborPriority == null ? LaborPriority.BALANCED : laborPriority;
         this.history = new ArrayList<>(history);
+        this.productionHistory = new ArrayList<>(productionHistory);
         trimHistory();
+        trimProductionHistory();
     }
 
     public static Settlement create(ResourceKey<Level> dimension, BlockPos townHallPos) {
@@ -75,6 +80,7 @@ public final class Settlement {
                 0,
                 0,
                 LaborPriority.BALANCED,
+                List.of(),
                 List.of()
         );
     }
@@ -84,6 +90,12 @@ public final class Settlement {
         ListTag historyTag = tag.getList(TAG_HISTORY, Tag.TAG_COMPOUND);
         for (int i = 0; i < historyTag.size(); i++) {
             history.add(HistoryPoint.load(historyTag.getCompound(i)));
+        }
+
+        List<ProductionPoint> productionHistory = new ArrayList<>();
+        ListTag productionTag = tag.getList(TAG_PRODUCTION_HISTORY, Tag.TAG_COMPOUND);
+        for (int i = 0; i < productionTag.size(); i++) {
+            productionHistory.add(ProductionPoint.load(productionTag.getCompound(i)));
         }
 
         LaborPriority laborPriority = tag.contains(TAG_LABOR_PRIORITY, Tag.TAG_STRING)
@@ -101,7 +113,8 @@ public final class Settlement {
                 tag.getInt(TAG_FOOD_JOB_CAPACITY),
                 tag.getInt(TAG_CONSTRUCTION_JOB_CAPACITY),
                 laborPriority,
-                history
+                history,
+                productionHistory
         );
     }
 
@@ -123,6 +136,12 @@ public final class Settlement {
             historyTag.add(historyPoint.save());
         }
         tag.put(TAG_HISTORY, historyTag);
+
+        ListTag productionTag = new ListTag();
+        for (ProductionPoint productionPoint : productionHistory) {
+            productionTag.add(productionPoint.save());
+        }
+        tag.put(TAG_PRODUCTION_HISTORY, productionTag);
         return tag;
     }
 
@@ -220,6 +239,102 @@ public final class Settlement {
         while (history.size() > HISTORY_LIMIT) {
             history.remove(0);
         }
+    }
+
+    public void ensureProductionDay(long day) {
+        if (!productionHistory.isEmpty() && day < productionHistory.get(productionHistory.size() - 1).day()) {
+            resetProductionHistory(day);
+            return;
+        }
+
+        if (productionHistory.isEmpty()) {
+            productionHistory.add(new ProductionPoint(day, 0, 0));
+            return;
+        }
+
+        long lastDay = productionHistory.get(productionHistory.size() - 1).day();
+        if (lastDay == day) {
+            return;
+        }
+
+        long firstMissingDay = lastDay + 1L;
+        if (day - firstMissingDay + 1L > HISTORY_LIMIT) {
+            productionHistory.clear();
+            firstMissingDay = day - HISTORY_LIMIT + 1L;
+        }
+
+        for (long missingDay = firstMissingDay; missingDay <= day; missingDay++) {
+            productionHistory.add(new ProductionPoint(missingDay, 0, 0));
+        }
+        trimProductionHistory();
+    }
+
+    public void resetProductionHistory(long day) {
+        productionHistory.clear();
+        productionHistory.add(new ProductionPoint(day, 0, 0));
+    }
+
+    public void recordIndustryOutput(long day, IndustryType type, int amount) {
+        if (amount <= 0 || type == null) {
+            return;
+        }
+
+        ensureProductionDay(day);
+        int lastIndex = productionHistory.size() - 1;
+        ProductionPoint current = productionHistory.get(lastIndex);
+        if (current.day() != day) {
+            return;
+        }
+
+        if (type == IndustryType.BAKERY) {
+            productionHistory.set(lastIndex, new ProductionPoint(
+                    day,
+                    current.foodOutput() + amount,
+                    current.constructionOutput()
+            ));
+        } else if (type == IndustryType.BRICKWORKS) {
+            productionHistory.set(lastIndex, new ProductionPoint(
+                    day,
+                    current.foodOutput(),
+                    current.constructionOutput() + amount
+            ));
+        }
+    }
+
+    private void trimProductionHistory() {
+        while (productionHistory.size() > HISTORY_LIMIT) {
+            productionHistory.remove(0);
+        }
+    }
+
+    public int getFoodOutputToday() {
+        return productionHistory.isEmpty() ? 0 : productionHistory.get(productionHistory.size() - 1).foodOutput();
+    }
+
+    public int getConstructionOutputToday() {
+        return productionHistory.isEmpty() ? 0 : productionHistory.get(productionHistory.size() - 1).constructionOutput();
+    }
+
+    public int getFoodOutputAverage(int days) {
+        return productionAverage(days, true);
+    }
+
+    public int getConstructionOutputAverage(int days) {
+        return productionAverage(days, false);
+    }
+
+    private int productionAverage(int days, boolean food) {
+        if (days <= 0 || productionHistory.isEmpty()) {
+            return 0;
+        }
+
+        int count = Math.min(days, productionHistory.size());
+        long total = 0L;
+        for (int i = productionHistory.size() - count; i < productionHistory.size(); i++) {
+            ProductionPoint point = productionHistory.get(i);
+            total += food ? point.foodOutput() : point.constructionOutput();
+        }
+        return (int) ((total + count / 2L) / count);
     }
 
     public int getBreadTarget() {
@@ -428,6 +543,10 @@ public final class Settlement {
         return Collections.unmodifiableList(history);
     }
 
+    public List<ProductionPoint> getProductionHistory() {
+        return Collections.unmodifiableList(productionHistory);
+    }
+
     private record EmploymentAllocation(int food, int construction) {
     }
 
@@ -469,6 +588,28 @@ public final class Settlement {
             tag.putInt(TAG_BUILDING_MATERIALS_SUPPLIED, buildingMaterialsSupplied);
             tag.putInt(TAG_BUILDING_MATERIALS_TARGET, buildingMaterialsTarget);
             tag.putInt(TAG_PROSPERITY, prosperity);
+            return tag;
+        }
+    }
+
+    public record ProductionPoint(long day, int foodOutput, int constructionOutput) {
+        private static final String TAG_DAY = "Day";
+        private static final String TAG_FOOD_OUTPUT = "FoodOutput";
+        private static final String TAG_CONSTRUCTION_OUTPUT = "ConstructionOutput";
+
+        static ProductionPoint load(CompoundTag tag) {
+            return new ProductionPoint(
+                    tag.getLong(TAG_DAY),
+                    Math.max(0, tag.getInt(TAG_FOOD_OUTPUT)),
+                    Math.max(0, tag.getInt(TAG_CONSTRUCTION_OUTPUT))
+            );
+        }
+
+        CompoundTag save() {
+            CompoundTag tag = new CompoundTag();
+            tag.putLong(TAG_DAY, day);
+            tag.putInt(TAG_FOOD_OUTPUT, foodOutput);
+            tag.putInt(TAG_CONSTRUCTION_OUTPUT, constructionOutput);
             return tag;
         }
     }

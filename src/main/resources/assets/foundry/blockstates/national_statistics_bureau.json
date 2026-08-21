@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "foundry:block/national_statistics_bureau" }
+  }
+}

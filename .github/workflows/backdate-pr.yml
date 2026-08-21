@@ -38,11 +38,16 @@ jobs:
           YESTERDAY=$(date -d 'yesterday' +%F)
           export TODAY YESTERDAY
 
-          if ! git log "$BASE"..HEAD --format='%aI' | while read -r author_date; do
-            [ "$(date -d "$author_date" +%F)" = "$TODAY" ] && exit 0
-          done; then
-            :
-          else
+          NEEDS_BACKDATE="no"
+          while read -r author_date; do
+            if [ "$(date -d "$author_date" +%F)" = "$TODAY" ]; then
+              NEEDS_BACKDATE="yes"
+              break
+            fi
+          done < <(git log "$BASE"..HEAD --format='%aI')
+
+          if [ "$NEEDS_BACKDATE" != "yes" ]; then
+            echo "No commits authored today; nothing to rewrite."
             exit 0
           fi
 

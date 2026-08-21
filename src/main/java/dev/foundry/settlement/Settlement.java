@@ -187,6 +187,11 @@ public final class Settlement {
         trimHistory();
     }
 
+    public void resetHistory(long day) {
+        history.clear();
+        recordHistory(day);
+    }
+
     private void trimHistory() {
         while (history.size() > HISTORY_LIMIT) {
             history.remove(0);

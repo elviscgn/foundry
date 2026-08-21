@@ -291,6 +291,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         tooltip.add(Component.literal("  Prices: ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal("Bread K" + syncedBreadPrice).withStyle(ChatFormatting.YELLOW))
                 .append(Component.literal("  Bricks K" + syncedBrickPrice).withStyle(ChatFormatting.AQUA)));
+        tooltip.add(Component.literal("  Reserve cap: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("Bread " + reserveCapacityForTarget(syncedBreadTarget))
+                        .withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal("  Bricks " + reserveCapacityForTarget(syncedMaterialsTarget))
+                        .withStyle(ChatFormatting.AQUA)));
         tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget).copy()
                 .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
         tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
@@ -345,6 +350,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         ChatFormatting valueColor = supplied >= target ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
         return Component.literal("  " + label + ": ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal(supplied + "/" + target).withStyle(valueColor));
+    }
+
+    private static int reserveCapacityForTarget(int target) {
+        long capacity = (long) Math.max(1, target) * Settlement.PROTOTYPE_RESERVE_MULTIPLIER;
+        return (int) Math.min(Integer.MAX_VALUE, capacity);
     }
 
     @Override
@@ -605,10 +615,11 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         private int remainingCapacity(Settlement settlement, ItemStack stack) {
             if (stack.is(Items.BREAD)) {
-                return Math.max(0, settlement.getBreadTarget() - settlement.getBreadSupplied());
+                return Math.max(0, settlement.getBreadReserveCapacity() - settlement.getBreadSupplied());
             }
             if (stack.is(Items.BRICK)) {
-                return Math.max(0, settlement.getBuildingMaterialsTarget() - settlement.getBuildingMaterialsSupplied());
+                return Math.max(0, settlement.getBuildingMaterialsReserveCapacity()
+                        - settlement.getBuildingMaterialsSupplied());
             }
             return 0;
         }

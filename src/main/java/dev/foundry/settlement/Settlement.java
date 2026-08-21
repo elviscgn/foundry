@@ -18,6 +18,7 @@ public final class Settlement {
     public static final int MAX_PROSPERITY = SettlementDevelopment.MAX_SCORE;
     public static final int GROWTH_PROSPERITY_THRESHOLD = 20;
     public static final int LABOR_FORCE_PERCENT = 50;
+    public static final int PROTOTYPE_RESERVE_MULTIPLIER = 4;
     private static final int BASE_BREAD_TARGET = 64;
     private static final int BASE_DAILY_BREAD_CONSUMPTION = 16;
     private static final int BASE_BUILDING_MATERIAL_TARGET = 32;
@@ -161,7 +162,7 @@ public final class Settlement {
     }
 
     public int deliverBread(int offered) {
-        int accepted = Math.min(Math.max(offered, 0), getBreadTarget() - breadSupplied);
+        int accepted = Math.min(Math.max(offered, 0), getBreadReserveCapacity() - breadSupplied);
         if (accepted <= 0) {
             return 0;
         }
@@ -171,7 +172,7 @@ public final class Settlement {
     }
 
     public int deliverBuildingMaterials(int offered) {
-        int accepted = Math.min(Math.max(offered, 0), getBuildingMaterialsTarget() - buildingMaterialsSupplied);
+        int accepted = Math.min(Math.max(offered, 0), getBuildingMaterialsReserveCapacity() - buildingMaterialsSupplied);
         if (accepted <= 0) {
             return 0;
         }
@@ -497,12 +498,20 @@ public final class Settlement {
         return scaledForPopulation(BASE_BREAD_TARGET);
     }
 
+    public int getBreadReserveCapacity() {
+        return reserveCapacity(getBreadTarget());
+    }
+
     public int getDailyBreadConsumption() {
         return scaledForPopulation(BASE_DAILY_BREAD_CONSUMPTION);
     }
 
     public int getBuildingMaterialsTarget() {
         return scaledForPopulation(BASE_BUILDING_MATERIAL_TARGET);
+    }
+
+    public int getBuildingMaterialsReserveCapacity() {
+        return reserveCapacity(getBuildingMaterialsTarget());
     }
 
     public int getGrowthMaterialCost() {
@@ -517,6 +526,11 @@ public final class Settlement {
         long scaled = ((long) Math.max(population, 1) * baseAmount + DEFAULT_POPULATION - 1L)
                 / DEFAULT_POPULATION;
         return (int) Math.max(1L, scaled);
+    }
+
+    private static int reserveCapacity(int target) {
+        long capacity = (long) Math.max(1, target) * PROTOTYPE_RESERVE_MULTIPLIER;
+        return (int) Math.min(Integer.MAX_VALUE, capacity);
     }
 
     public int getWorkforce() {

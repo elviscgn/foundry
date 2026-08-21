@@ -2,6 +2,7 @@ package dev.foundry.block;
 
 import dev.foundry.network.FoundryNetwork;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementIdentity;
 import dev.foundry.settlement.SettlementSavedData;
 import dev.foundry.settlement.SettlementTier;
 import net.minecraft.core.BlockPos;
@@ -45,21 +46,23 @@ public final class TownHallBlock extends Block {
 
         SettlementSavedData data = SettlementSavedData.get(serverLevel);
         Settlement settlement = data.getOrCreate(serverLevel.dimension(), pos);
+        SettlementTier tier = data.getSettlementTier(settlement);
+        String settlementLabel = SettlementIdentity.label(settlement, tier);
 
         if (serverPlayer.isShiftKeyDown()) {
             settlement.cycleLaborPriority();
             data.setDirty();
             data.refreshIndustrySignals(serverLevel.getServer());
             serverPlayer.displayClientMessage(
-                    Component.literal("Labor priority // " + settlement.getLaborPriority().displayName()),
+                    Component.literal(settlementLabel + " // Labor priority // "
+                            + settlement.getLaborPriority().displayName()),
                     true
             );
             return InteractionResult.CONSUME;
         }
 
-        SettlementTier tier = data.getSettlementTier(settlement);
         serverPlayer.displayClientMessage(
-                Component.literal(tier.displayName() + " // Territory radius " + tier.claimRadius() + " blocks"),
+                Component.literal(settlementLabel + " // Territory radius " + tier.claimRadius() + " blocks"),
                 true
         );
         FoundryNetwork.sendSettlementSnapshot(serverPlayer, settlement);

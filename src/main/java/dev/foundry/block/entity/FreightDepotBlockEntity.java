@@ -9,6 +9,7 @@ import dev.foundry.registry.ModItems;
 import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementFinance;
+import dev.foundry.settlement.SettlementIdentity;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -39,6 +40,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
     private static final String TAG_OPERATING_MODE = "OperatingMode";
     private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
+    private static final String TAG_SETTLEMENT_LABEL = "SettlementLabel";
     private static final String TAG_POPULATION = "SyncedPopulation";
     private static final String TAG_PROSPERITY = "SyncedProsperity";
     private static final String TAG_BREAD_SUPPLIED = "SyncedBreadSupplied";
@@ -67,6 +69,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
     private OperatingMode operatingMode = OperatingMode.INTAKE;
     private boolean settlementLinked;
+    private String syncedSettlementLabel = "";
     private int syncedPopulation;
     private int syncedProsperity;
     private int syncedBreadSupplied;
@@ -163,13 +166,14 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         boolean changed;
         if (settlement == null) {
-            changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false,
+            changed = applySnapshot(false, "", 0, 0, 0, 0, 0, 0, 0, false,
                     0, 0, 0, 0, 0, 0, 0, 0,
                     0L, 0L, 0, 0, 0L, 0L);
         } else {
             SettlementFinance finance = savedData.getFinance(settlement);
             changed = applySnapshot(
                     true,
+                    SettlementIdentity.label(settlement, savedData.getSettlementTier(settlement)),
                     settlement.getPopulation(),
                     settlement.getProsperity(),
                     settlement.getBreadSupplied(),
@@ -202,7 +206,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         }
     }
 
-    private boolean applySnapshot(boolean linked, int population, int prosperity,
+    private boolean applySnapshot(boolean linked, String settlementLabel, int population, int prosperity,
                                   int breadSupplied, int breadTarget, int dailyBread,
                                   int materialsSupplied, int materialsTarget, boolean growthReady,
                                   int foodOutputToday, int constructionOutputToday,
@@ -210,7 +214,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                                   int breadImports, int breadExports, int brickImports, int brickExports,
                                   long localLiquidity, long treasury, int breadPrice, int brickPrice,
                                   long importValue, long exportValue) {
+        String safeSettlementLabel = settlementLabel == null ? "" : settlementLabel;
         boolean changed = settlementLinked != linked
+                || !syncedSettlementLabel.equals(safeSettlementLabel)
                 || syncedPopulation != population
                 || syncedProsperity != prosperity
                 || syncedBreadSupplied != breadSupplied
@@ -235,6 +241,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 || syncedExportValue != exportValue;
 
         settlementLinked = linked;
+        syncedSettlementLabel = safeSettlementLabel;
         syncedPopulation = population;
         syncedProsperity = prosperity;
         syncedBreadSupplied = breadSupplied;
@@ -275,7 +282,8 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
             return true;
         }
 
-        tooltip.add(Component.literal("  Linked settlement").withStyle(ChatFormatting.GREEN));
+        tooltip.add(Component.literal("  Linked: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(syncedSettlementLabel).withStyle(ChatFormatting.GREEN)));
         tooltip.add(valueLine("Population", syncedPopulation, ChatFormatting.AQUA));
         tooltip.add(Component.literal("  Kora: ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal("local K" + syncedLocalLiquidity).withStyle(ChatFormatting.GREEN))
@@ -286,7 +294,8 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget).copy()
                 .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
         tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
-        tooltip.add(valueLine("Prosperity", syncedProsperity, ChatFormatting.GOLD));
+        tooltip.add(Component.literal("  Prosperity: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal(syncedProsperity + "/100").withStyle(ChatFormatting.GOLD)));
         tooltip.add(Component.literal("  Measured output today: ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal("Food " + syncedFoodOutputToday).withStyle(ChatFormatting.GREEN))
                 .append(Component.literal("  Construction " + syncedConstructionOutputToday)
@@ -368,6 +377,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private void writeSnapshot(CompoundTag tag) {
         tag.putString(TAG_OPERATING_MODE, operatingMode.serializedName());
         tag.putBoolean(TAG_SETTLEMENT_LINKED, settlementLinked);
+        tag.putString(TAG_SETTLEMENT_LABEL, syncedSettlementLabel);
         tag.putInt(TAG_POPULATION, syncedPopulation);
         tag.putInt(TAG_PROSPERITY, syncedProsperity);
         tag.putInt(TAG_BREAD_SUPPLIED, syncedBreadSupplied);
@@ -397,6 +407,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 ? OperatingMode.fromSerializedName(tag.getString(TAG_OPERATING_MODE))
                 : OperatingMode.INTAKE;
         settlementLinked = tag.getBoolean(TAG_SETTLEMENT_LINKED);
+        syncedSettlementLabel = tag.contains(TAG_SETTLEMENT_LABEL, Tag.TAG_STRING)
+                ? tag.getString(TAG_SETTLEMENT_LABEL)
+                : "";
         syncedPopulation = tag.getInt(TAG_POPULATION);
         syncedProsperity = tag.getInt(TAG_PROSPERITY);
         syncedBreadSupplied = tag.getInt(TAG_BREAD_SUPPLIED);

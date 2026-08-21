@@ -15,7 +15,8 @@ import java.util.UUID;
 public final class Settlement {
     public static final int DEFAULT_POPULATION = 120;
     public static final int HISTORY_LIMIT = 30;
-    public static final int GROWTH_PROSPERITY_THRESHOLD = 3;
+    public static final int MAX_PROSPERITY = SettlementDevelopment.MAX_SCORE;
+    public static final int GROWTH_PROSPERITY_THRESHOLD = 20;
     public static final int LABOR_FORCE_PERCENT = 50;
     private static final int BASE_BREAD_TARGET = 64;
     private static final int BASE_DAILY_BREAD_CONSUMPTION = 16;
@@ -45,13 +46,12 @@ public final class Settlement {
     private int population;
     private int breadSupplied;
     private int buildingMaterialsSupplied;
-    private int prosperity;
     private int foodJobCapacity;
     private int constructionJobCapacity;
     private LaborPriority laborPriority;
 
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
-                       int buildingMaterialsSupplied, int prosperity, int foodJobCapacity,
+                       int buildingMaterialsSupplied, int foodJobCapacity,
                        int constructionJobCapacity, LaborPriority laborPriority, List<HistoryPoint> history,
                        List<ProductionPoint> productionHistory, List<TradePoint> tradeHistory) {
         this.id = id;
@@ -60,7 +60,6 @@ public final class Settlement {
         this.population = population;
         this.breadSupplied = breadSupplied;
         this.buildingMaterialsSupplied = buildingMaterialsSupplied;
-        this.prosperity = prosperity;
         this.foodJobCapacity = Math.max(0, foodJobCapacity);
         this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
         this.laborPriority = laborPriority == null ? LaborPriority.BALANCED : laborPriority;
@@ -78,7 +77,6 @@ public final class Settlement {
                 dimension.location().toString(),
                 townHallPos.asLong(),
                 DEFAULT_POPULATION,
-                0,
                 0,
                 0,
                 0,
@@ -120,7 +118,6 @@ public final class Settlement {
                 tag.getInt(TAG_POPULATION),
                 tag.getInt(TAG_BREAD_SUPPLIED),
                 tag.getInt(TAG_BUILDING_MATERIALS_SUPPLIED),
-                tag.getInt(TAG_PROSPERITY),
                 tag.getInt(TAG_FOOD_JOB_CAPACITY),
                 tag.getInt(TAG_CONSTRUCTION_JOB_CAPACITY),
                 laborPriority,
@@ -138,7 +135,7 @@ public final class Settlement {
         tag.putInt(TAG_POPULATION, population);
         tag.putInt(TAG_BREAD_SUPPLIED, breadSupplied);
         tag.putInt(TAG_BUILDING_MATERIALS_SUPPLIED, buildingMaterialsSupplied);
-        tag.putInt(TAG_PROSPERITY, prosperity);
+        tag.putInt(TAG_PROSPERITY, getProsperity());
         tag.putInt(TAG_FOOD_JOB_CAPACITY, foodJobCapacity);
         tag.putInt(TAG_CONSTRUCTION_JOB_CAPACITY, constructionJobCapacity);
         tag.putString(TAG_LABOR_PRIORITY, laborPriority.serializedName());
@@ -169,11 +166,7 @@ public final class Settlement {
             return 0;
         }
 
-        boolean wasSupplied = isSupplied();
         breadSupplied += accepted;
-        if (!wasSupplied && isSupplied()) {
-            prosperity += 1;
-        }
         return accepted;
     }
 
@@ -253,7 +246,7 @@ public final class Settlement {
                 getBreadTarget(),
                 buildingMaterialsSupplied,
                 getBuildingMaterialsTarget(),
-                prosperity
+                getProsperity()
         );
 
         if (!history.isEmpty() && history.get(history.size() - 1).day() == day) {
@@ -655,7 +648,7 @@ public final class Settlement {
     public boolean isGrowthReady() {
         return isSupplied()
                 && hasBuildingMaterials()
-                && prosperity >= GROWTH_PROSPERITY_THRESHOLD;
+                && getProsperity() >= GROWTH_PROSPERITY_THRESHOLD;
     }
 
     public boolean matches(ResourceKey<Level> dimension, BlockPos pos) {
@@ -699,7 +692,7 @@ public final class Settlement {
     }
 
     public int getProsperity() {
-        return prosperity;
+        return SettlementDevelopment.score(this);
     }
 
     public List<HistoryPoint> getHistory() {
@@ -742,7 +735,7 @@ public final class Settlement {
                     tag.getInt(TAG_BREAD_TARGET),
                     tag.getInt(TAG_BUILDING_MATERIALS_SUPPLIED),
                     tag.getInt(TAG_BUILDING_MATERIALS_TARGET),
-                    tag.getInt(TAG_PROSPERITY)
+                    Math.max(0, Math.min(MAX_PROSPERITY, tag.getInt(TAG_PROSPERITY)))
             );
         }
 

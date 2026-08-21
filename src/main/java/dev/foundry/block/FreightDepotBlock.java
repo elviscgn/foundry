@@ -4,6 +4,7 @@ import dev.foundry.block.entity.FreightDepotBlockEntity;
 import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementIdentity;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -100,6 +101,7 @@ public final class FreightDepotBlock extends BaseEntityBlock {
             return InteractionResult.CONSUME;
         }
 
+        String settlementLabel = SettlementIdentity.label(settlement, savedData.getSettlementTier(settlement));
         ItemStack heldStack = player.getItemInHand(hand);
         if (player.isShiftKeyDown() && heldStack.isEmpty()) {
             SettlementSavedData.IndustryLinkResult result = savedData.completeIndustryDepotLink(
@@ -122,7 +124,8 @@ public final class FreightDepotBlock extends BaseEntityBlock {
             if (depot != null) {
                 String mode = depot.cycleOperatingMode();
                 player.displayClientMessage(
-                        Component.literal("Freight Depot // MODE " + mode.toUpperCase())
+                        Component.literal("Freight Depot // " + settlementLabel
+                                + " // MODE " + mode.toUpperCase())
                                 .withStyle(ChatFormatting.GOLD),
                         true
                 );
@@ -185,11 +188,14 @@ public final class FreightDepotBlock extends BaseEntityBlock {
             if (depot != null) {
                 depot.refreshGoggleState();
             }
-            player.displayClientMessage(deliveryMessage(settlement, accepted, commodity), false);
+            player.displayClientMessage(deliveryMessage(settlement, settlementLabel, accepted, commodity), false);
             return InteractionResult.CONSUME;
         }
 
-        player.displayClientMessage(statusMessage(settlement, depot == null ? "Intake" : depot.getOperatingModeLabel()), false);
+        player.displayClientMessage(
+                statusMessage(settlement, settlementLabel, depot == null ? "Intake" : depot.getOperatingModeLabel()),
+                false
+        );
         return InteractionResult.CONSUME;
     }
 
@@ -201,20 +207,23 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         super.onRemove(state, level, pos, newState, isMoving);
     }
 
-    private static Component deliveryMessage(Settlement settlement, int accepted, String commodity) {
-        return Component.literal("Freight Depot | Accepted " + accepted + " " + commodity + " | ")
+    private static Component deliveryMessage(Settlement settlement, String settlementLabel,
+                                             int accepted, String commodity) {
+        return Component.literal("Freight Depot | " + settlementLabel + " | Accepted "
+                        + accepted + " " + commodity + " | ")
                 .withStyle(ChatFormatting.GOLD)
                 .append(Component.literal("Bread " + settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
                 .append(Component.literal(" | Bricks " + settlement.getBuildingMaterialsSupplied()
                         + "/" + settlement.getBuildingMaterialsTarget()).withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
+                .append(Component.literal(" | Prosperity " + settlement.getProsperity() + "/100")
+                        .withStyle(ChatFormatting.AQUA));
     }
 
-    private static Component statusMessage(Settlement settlement, String mode) {
+    private static Component statusMessage(Settlement settlement, String settlementLabel, String mode) {
         String growthState = settlement.isGrowthReady() ? "GROWTH READY" : "STABLE";
         ChatFormatting growthColor = settlement.isGrowthReady() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
 
-        return Component.literal("Freight Depot | " + mode + " | Bread ")
+        return Component.literal("Freight Depot | " + settlementLabel + " | " + mode + " | Bread ")
                 .withStyle(ChatFormatting.GOLD)
                 .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
                 .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
@@ -225,6 +234,7 @@ public final class FreightDepotBlock extends BaseEntityBlock {
                 .append(Component.literal(" R +" + settlement.getBrickImportsToday()
                         + "/-" + settlement.getBrickExportsToday()).withStyle(ChatFormatting.AQUA))
                 .append(Component.literal(" | " + growthState).withStyle(growthColor))
-                .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
+                .append(Component.literal(" | Prosperity " + settlement.getProsperity() + "/100")
+                        .withStyle(ChatFormatting.AQUA));
     }
 }

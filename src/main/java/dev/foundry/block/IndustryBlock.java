@@ -2,6 +2,7 @@ package dev.foundry.block;
 
 import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementIdentity;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -76,7 +77,8 @@ public final class IndustryBlock extends Block {
         if (settlement == null) {
             syncStaffing(serverLevel, pos, 0);
             player.displayClientMessage(
-                    Component.literal(industryType.displayName() + " // UNLINKED // No Town Hall within 128 blocks"),
+                    Component.literal(industryType.displayName()
+                            + " // UNLINKED // No settlement territory covers this block"),
                     true
             );
             return InteractionResult.CONSUME;
@@ -98,10 +100,12 @@ public final class IndustryBlock extends Block {
         String status = staffingSignal >= 15 ? "ACTIVE" : staffingSignal > 0 ? "UNDERSTAFFED" : "IDLE";
         String clutch = staffingSignal >= 15 ? "CLUTCH STOP OFF" : "CLUTCH STOP ON";
         String line = telemetry.depotLinked() ? "LINE LINKED" : "LINE UNLINKED";
+        String settlementLabel = SettlementIdentity.label(settlement, savedData.getSettlementTier(settlement));
 
         player.displayClientMessage(
                 Component.literal(industryType.displayName()
                         + " // " + status
+                        + " // Linked: " + settlementLabel
                         + " // " + industryType.sectorName() + " " + sectorEmployed + "/" + sectorJobs
                         + " staffed (" + staffingPercent + "%)"
                         + " // " + line

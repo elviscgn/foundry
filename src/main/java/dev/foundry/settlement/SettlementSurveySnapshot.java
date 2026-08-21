@@ -18,7 +18,7 @@ import java.util.UUID;
  * This deliberately carries only spatial data needed by the in-world survey overlay.
  */
 public record SettlementSurveySnapshot(List<SurveySettlement> settlements) {
-    public static final int CLAIM_RANGE = 128;
+    public static final int CLAIM_RANGE = SettlementSavedData.DEFAULT_SETTLEMENT_RADIUS;
 
     public SettlementSurveySnapshot {
         settlements = List.copyOf(settlements);

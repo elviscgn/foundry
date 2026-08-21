@@ -71,9 +71,10 @@ public final class TownHallBlock extends Block {
 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (state.getBlock() != newState.getBlock() && level instanceof ServerLevel serverLevel) {
-            SettlementSavedData.get(serverLevel).remove(serverLevel.dimension(), pos);
-        }
+        // The Town Hall is a civic control surface, not the settlement itself. Demolishing or
+        // temporarily moving the block must not erase the population, economy, finances,
+        // industry/depot links, or invalidate freight already in transit. A future explicit
+        // abandon/dissolve action should be responsible for permanently deleting a settlement.
         super.onRemove(state, level, pos, newState, isMoving);
     }
 }

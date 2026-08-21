@@ -1,7 +1,10 @@
 package dev.foundry.network.packet;
 
 import dev.foundry.client.ClientSettlementScreens;
+import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementFinance;
+import dev.foundry.settlement.SettlementSavedData;
 import dev.foundry.settlement.SettlementTier;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.api.distmarker.Dist;
@@ -15,6 +18,24 @@ import java.util.function.Supplier;
 public record SettlementSnapshotPacket(
         String settlementTier,
         int claimRadius,
+        String currencyName,
+        String currencySymbol,
+        String currencyCode,
+        long localLiquidity,
+        long treasuryBalance,
+        int commercialTaxPercent,
+        int breadUnitPrice,
+        int brickUnitPrice,
+        long importValueToday,
+        long exportValueToday,
+        long tradeBalanceToday,
+        long taxRevenueToday,
+        long publicSpendingToday,
+        long budgetBalanceToday,
+        long importValueAverage7d,
+        long exportValueAverage7d,
+        long taxRevenueAverage7d,
+        long publicSpendingAverage7d,
         int population,
         int workforce,
         int employed,
@@ -45,9 +66,10 @@ public record SettlementSnapshotPacket(
         int dailyGrowthAmount,
         int prosperity,
         boolean growthReady,
-        List<HistoryPointSnapshot> history
+        List<HistoryPointSnapshot> history,
+        List<FinancePointSnapshot> financeHistory
 ) {
-    public static SettlementSnapshotPacket from(Settlement settlement) {
+    public static SettlementSnapshotPacket from(Settlement settlement, SettlementSavedData data) {
         List<HistoryPointSnapshot> history = settlement.getHistory().stream()
                 .map(point -> new HistoryPointSnapshot(
                         point.day(),
@@ -59,11 +81,44 @@ public record SettlementSnapshotPacket(
                         point.prosperity()
                 ))
                 .toList();
-        SettlementTier tier = SettlementTier.forSettlement(settlement);
+
+        SettlementFinance finance = data.getFinance(settlement);
+        List<FinancePointSnapshot> financeHistory = finance == null
+                ? List.of()
+                : finance.getHistory().stream()
+                .map(point -> new FinancePointSnapshot(
+                        point.day(),
+                        point.localLiquidity(),
+                        point.treasuryBalance(),
+                        point.importValue(),
+                        point.exportValue(),
+                        point.taxRevenue(),
+                        point.publicSpending()
+                ))
+                .toList();
+        SettlementTier tier = data.getSettlementTier(settlement);
 
         return new SettlementSnapshotPacket(
                 tier.displayName(),
                 tier.claimRadius(),
+                SettlementFinance.CURRENCY_NAME,
+                SettlementFinance.CURRENCY_SYMBOL,
+                SettlementFinance.CURRENCY_CODE,
+                finance == null ? 0L : finance.getLocalLiquidity(),
+                finance == null ? 0L : finance.getTreasuryBalance(),
+                finance == null ? SettlementFinance.DEFAULT_COMMERCIAL_TAX_PERCENT : finance.getCommercialTaxPercent(),
+                data.getCommodityUnitPrice(settlement, IndustryType.BAKERY),
+                data.getCommodityUnitPrice(settlement, IndustryType.BRICKWORKS),
+                finance == null ? 0L : finance.getImportValueToday(),
+                finance == null ? 0L : finance.getExportValueToday(),
+                finance == null ? 0L : finance.getTradeBalanceToday(),
+                finance == null ? 0L : finance.getTaxRevenueToday(),
+                finance == null ? 0L : finance.getPublicSpendingToday(),
+                finance == null ? 0L : finance.getBudgetBalanceToday(),
+                finance == null ? 0L : finance.getImportValueAverage(7),
+                finance == null ? 0L : finance.getExportValueAverage(7),
+                finance == null ? 0L : finance.getTaxRevenueAverage(7),
+                finance == null ? 0L : finance.getPublicSpendingAverage(7),
                 settlement.getPopulation(),
                 settlement.getWorkforce(),
                 settlement.getEmployed(),
@@ -94,13 +149,32 @@ public record SettlementSnapshotPacket(
                 settlement.getDailyGrowthAmount(),
                 settlement.getProsperity(),
                 settlement.isGrowthReady(),
-                history
+                history,
+                financeHistory
         );
     }
 
     public static void encode(SettlementSnapshotPacket packet, FriendlyByteBuf buffer) {
         buffer.writeUtf(packet.settlementTier, 32);
         buffer.writeVarInt(packet.claimRadius);
+        buffer.writeUtf(packet.currencyName, 32);
+        buffer.writeUtf(packet.currencySymbol, 8);
+        buffer.writeUtf(packet.currencyCode, 8);
+        buffer.writeLong(packet.localLiquidity);
+        buffer.writeLong(packet.treasuryBalance);
+        buffer.writeVarInt(packet.commercialTaxPercent);
+        buffer.writeVarInt(packet.breadUnitPrice);
+        buffer.writeVarInt(packet.brickUnitPrice);
+        buffer.writeLong(packet.importValueToday);
+        buffer.writeLong(packet.exportValueToday);
+        buffer.writeLong(packet.tradeBalanceToday);
+        buffer.writeLong(packet.taxRevenueToday);
+        buffer.writeLong(packet.publicSpendingToday);
+        buffer.writeLong(packet.budgetBalanceToday);
+        buffer.writeLong(packet.importValueAverage7d);
+        buffer.writeLong(packet.exportValueAverage7d);
+        buffer.writeLong(packet.taxRevenueAverage7d);
+        buffer.writeLong(packet.publicSpendingAverage7d);
         buffer.writeVarInt(packet.population);
         buffer.writeVarInt(packet.workforce);
         buffer.writeVarInt(packet.employed);
@@ -142,11 +216,40 @@ public record SettlementSnapshotPacket(
             buffer.writeVarInt(point.buildingMaterialsTarget());
             buffer.writeVarInt(point.prosperity());
         }
+
+        buffer.writeVarInt(packet.financeHistory.size());
+        for (FinancePointSnapshot point : packet.financeHistory) {
+            buffer.writeVarLong(point.day());
+            buffer.writeLong(point.localLiquidity());
+            buffer.writeLong(point.treasuryBalance());
+            buffer.writeLong(point.importValue());
+            buffer.writeLong(point.exportValue());
+            buffer.writeLong(point.taxRevenue());
+            buffer.writeLong(point.publicSpending());
+        }
     }
 
     public static SettlementSnapshotPacket decode(FriendlyByteBuf buffer) {
         String settlementTier = buffer.readUtf(32);
         int claimRadius = buffer.readVarInt();
+        String currencyName = buffer.readUtf(32);
+        String currencySymbol = buffer.readUtf(8);
+        String currencyCode = buffer.readUtf(8);
+        long localLiquidity = buffer.readLong();
+        long treasuryBalance = buffer.readLong();
+        int commercialTaxPercent = buffer.readVarInt();
+        int breadUnitPrice = buffer.readVarInt();
+        int brickUnitPrice = buffer.readVarInt();
+        long importValueToday = buffer.readLong();
+        long exportValueToday = buffer.readLong();
+        long tradeBalanceToday = buffer.readLong();
+        long taxRevenueToday = buffer.readLong();
+        long publicSpendingToday = buffer.readLong();
+        long budgetBalanceToday = buffer.readLong();
+        long importValueAverage7d = buffer.readLong();
+        long exportValueAverage7d = buffer.readLong();
+        long taxRevenueAverage7d = buffer.readLong();
+        long publicSpendingAverage7d = buffer.readLong();
         int population = buffer.readVarInt();
         int workforce = buffer.readVarInt();
         int employed = buffer.readVarInt();
@@ -192,9 +295,41 @@ public record SettlementSnapshotPacket(
             ));
         }
 
+        int financeHistorySize = Math.min(buffer.readVarInt(), Settlement.HISTORY_LIMIT);
+        List<FinancePointSnapshot> financeHistory = new ArrayList<>(financeHistorySize);
+        for (int i = 0; i < financeHistorySize; i++) {
+            financeHistory.add(new FinancePointSnapshot(
+                    buffer.readVarLong(),
+                    buffer.readLong(),
+                    buffer.readLong(),
+                    buffer.readLong(),
+                    buffer.readLong(),
+                    buffer.readLong(),
+                    buffer.readLong()
+            ));
+        }
+
         return new SettlementSnapshotPacket(
                 settlementTier,
                 claimRadius,
+                currencyName,
+                currencySymbol,
+                currencyCode,
+                localLiquidity,
+                treasuryBalance,
+                commercialTaxPercent,
+                breadUnitPrice,
+                brickUnitPrice,
+                importValueToday,
+                exportValueToday,
+                tradeBalanceToday,
+                taxRevenueToday,
+                publicSpendingToday,
+                budgetBalanceToday,
+                importValueAverage7d,
+                exportValueAverage7d,
+                taxRevenueAverage7d,
+                publicSpendingAverage7d,
                 population,
                 workforce,
                 employed,
@@ -225,7 +360,8 @@ public record SettlementSnapshotPacket(
                 dailyGrowthAmount,
                 prosperity,
                 growthReady,
-                history
+                history,
+                financeHistory
         );
     }
 
@@ -247,5 +383,23 @@ public record SettlementSnapshotPacket(
             int buildingMaterialsTarget,
             int prosperity
     ) {
+    }
+
+    public record FinancePointSnapshot(
+            long day,
+            long localLiquidity,
+            long treasuryBalance,
+            long importValue,
+            long exportValue,
+            long taxRevenue,
+            long publicSpending
+    ) {
+        public long tradeBalance() {
+            return exportValue - importValue;
+        }
+
+        public long budgetBalance() {
+            return taxRevenue - publicSpending;
+        }
     }
 }

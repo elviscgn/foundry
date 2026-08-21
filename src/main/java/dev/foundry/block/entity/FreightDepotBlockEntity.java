@@ -8,6 +8,7 @@ import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModItems;
 import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
+import dev.foundry.settlement.SettlementFinance;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -34,6 +35,7 @@ import java.util.UUID;
 public final class FreightDepotBlockEntity extends SmartBlockEntity implements IHaveGoggleInformation {
     private static final long TICKS_PER_DAY = 24_000L;
     public static final String TAG_EXPORT_ORIGIN = "FoundryExportOrigin";
+    public static final String TAG_EXPORT_UNIT_PRICE = "FoundryExportUnitPrice";
 
     private static final String TAG_OPERATING_MODE = "OperatingMode";
     private static final String TAG_SETTLEMENT_LINKED = "SettlementLinked";
@@ -53,6 +55,12 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private static final String TAG_BREAD_EXPORTS = "SyncedBreadExports";
     private static final String TAG_BRICK_IMPORTS = "SyncedBrickImports";
     private static final String TAG_BRICK_EXPORTS = "SyncedBrickExports";
+    private static final String TAG_LOCAL_LIQUIDITY = "SyncedLocalLiquidity";
+    private static final String TAG_TREASURY = "SyncedTreasury";
+    private static final String TAG_BREAD_PRICE = "SyncedBreadPrice";
+    private static final String TAG_BRICK_PRICE = "SyncedBrickPrice";
+    private static final String TAG_IMPORT_VALUE = "SyncedImportValue";
+    private static final String TAG_EXPORT_VALUE = "SyncedExportValue";
 
     private final IItemHandler depotItemHandler = new DepotItemHandler();
     private LazyOptional<IItemHandler> itemHandlerCapability = LazyOptional.of(() -> depotItemHandler);
@@ -75,6 +83,12 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
     private int syncedBreadExports;
     private int syncedBrickImports;
     private int syncedBrickExports;
+    private long syncedLocalLiquidity;
+    private long syncedTreasury;
+    private int syncedBreadPrice;
+    private int syncedBrickPrice;
+    private long syncedImportValue;
+    private long syncedExportValue;
 
     public FreightDepotBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.FREIGHT_DEPOT.get(), pos, state);
@@ -125,6 +139,17 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         return tag.getUUID(TAG_EXPORT_ORIGIN);
     }
 
+    public static int getDomesticTradeUnitPrice(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) {
+            return 0;
+        }
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains(TAG_EXPORT_UNIT_PRICE, Tag.TAG_INT)) {
+            return 0;
+        }
+        return Math.max(0, tag.getInt(TAG_EXPORT_UNIT_PRICE));
+    }
+
     public void refreshGoggleState() {
         if (!(level instanceof ServerLevel serverLevel)) {
             return;
@@ -139,8 +164,10 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         boolean changed;
         if (settlement == null) {
             changed = applySnapshot(false, 0, 0, 0, 0, 0, 0, 0, false,
-                    0, 0, 0, 0, 0, 0, 0, 0);
+                    0, 0, 0, 0, 0, 0, 0, 0,
+                    0L, 0L, 0, 0, 0L, 0L);
         } else {
+            SettlementFinance finance = savedData.getFinance(settlement);
             changed = applySnapshot(
                     true,
                     settlement.getPopulation(),
@@ -158,7 +185,13 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                     settlement.getBreadImportsToday(),
                     settlement.getBreadExportsToday(),
                     settlement.getBrickImportsToday(),
-                    settlement.getBrickExportsToday()
+                    settlement.getBrickExportsToday(),
+                    finance == null ? 0L : finance.getLocalLiquidity(),
+                    finance == null ? 0L : finance.getTreasuryBalance(),
+                    savedData.getCommodityUnitPrice(settlement, IndustryType.BAKERY),
+                    savedData.getCommodityUnitPrice(settlement, IndustryType.BRICKWORKS),
+                    finance == null ? 0L : finance.getImportValueToday(),
+                    finance == null ? 0L : finance.getExportValueToday()
             );
         }
 
@@ -174,7 +207,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                                   int materialsSupplied, int materialsTarget, boolean growthReady,
                                   int foodOutputToday, int constructionOutputToday,
                                   int foodOutputAverage, int constructionOutputAverage,
-                                  int breadImports, int breadExports, int brickImports, int brickExports) {
+                                  int breadImports, int breadExports, int brickImports, int brickExports,
+                                  long localLiquidity, long treasury, int breadPrice, int brickPrice,
+                                  long importValue, long exportValue) {
         boolean changed = settlementLinked != linked
                 || syncedPopulation != population
                 || syncedProsperity != prosperity
@@ -191,7 +226,13 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 || syncedBreadImports != breadImports
                 || syncedBreadExports != breadExports
                 || syncedBrickImports != brickImports
-                || syncedBrickExports != brickExports;
+                || syncedBrickExports != brickExports
+                || syncedLocalLiquidity != localLiquidity
+                || syncedTreasury != treasury
+                || syncedBreadPrice != breadPrice
+                || syncedBrickPrice != brickPrice
+                || syncedImportValue != importValue
+                || syncedExportValue != exportValue;
 
         settlementLinked = linked;
         syncedPopulation = population;
@@ -210,6 +251,12 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedBreadExports = breadExports;
         syncedBrickImports = brickImports;
         syncedBrickExports = brickExports;
+        syncedLocalLiquidity = localLiquidity;
+        syncedTreasury = treasury;
+        syncedBreadPrice = breadPrice;
+        syncedBrickPrice = brickPrice;
+        syncedImportValue = importValue;
+        syncedExportValue = exportValue;
         return changed;
     }
 
@@ -223,13 +270,19 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
 
         if (!settlementLinked) {
             tooltip.add(Component.literal("  No linked settlement").withStyle(ChatFormatting.RED));
-            tooltip.add(Component.literal("  Town Hall required within 128 blocks")
+            tooltip.add(Component.literal("  Must be inside settlement territory")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return true;
         }
 
         tooltip.add(Component.literal("  Linked settlement").withStyle(ChatFormatting.GREEN));
         tooltip.add(valueLine("Population", syncedPopulation, ChatFormatting.AQUA));
+        tooltip.add(Component.literal("  Kora: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("local K" + syncedLocalLiquidity).withStyle(ChatFormatting.GREEN))
+                .append(Component.literal("  treasury K" + syncedTreasury).withStyle(ChatFormatting.GOLD)));
+        tooltip.add(Component.literal("  Prices: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("Bread K" + syncedBreadPrice).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal("  Bricks K" + syncedBrickPrice).withStyle(ChatFormatting.AQUA)));
         tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget).copy()
                 .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
         tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
@@ -248,6 +301,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                         .withStyle(ChatFormatting.YELLOW))
                 .append(Component.literal("  Bricks +" + syncedBrickImports + "/-" + syncedBrickExports)
                         .withStyle(ChatFormatting.AQUA)));
+        tooltip.add(Component.literal("  Settled trade value: ").withStyle(ChatFormatting.GRAY)
+                .append(Component.literal("+K" + syncedExportValue).withStyle(ChatFormatting.GREEN))
+                .append(Component.literal(" / -K" + syncedImportValue).withStyle(ChatFormatting.RED)));
 
         if (operatingMode != OperatingMode.INTAKE) {
             tooltip.add(Component.literal("  Export through a funnel/chute into Create logistics")
@@ -328,6 +384,12 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         tag.putInt(TAG_BREAD_EXPORTS, syncedBreadExports);
         tag.putInt(TAG_BRICK_IMPORTS, syncedBrickImports);
         tag.putInt(TAG_BRICK_EXPORTS, syncedBrickExports);
+        tag.putLong(TAG_LOCAL_LIQUIDITY, syncedLocalLiquidity);
+        tag.putLong(TAG_TREASURY, syncedTreasury);
+        tag.putInt(TAG_BREAD_PRICE, syncedBreadPrice);
+        tag.putInt(TAG_BRICK_PRICE, syncedBrickPrice);
+        tag.putLong(TAG_IMPORT_VALUE, syncedImportValue);
+        tag.putLong(TAG_EXPORT_VALUE, syncedExportValue);
     }
 
     private void readSnapshot(CompoundTag tag) {
@@ -351,6 +413,12 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         syncedBreadExports = tag.getInt(TAG_BREAD_EXPORTS);
         syncedBrickImports = tag.getInt(TAG_BRICK_IMPORTS);
         syncedBrickExports = tag.getInt(TAG_BRICK_EXPORTS);
+        syncedLocalLiquidity = Math.max(0L, tag.getLong(TAG_LOCAL_LIQUIDITY));
+        syncedTreasury = Math.max(0L, tag.getLong(TAG_TREASURY));
+        syncedBreadPrice = Math.max(0, tag.getInt(TAG_BREAD_PRICE));
+        syncedBrickPrice = Math.max(0, tag.getInt(TAG_BRICK_PRICE));
+        syncedImportValue = Math.max(0L, tag.getLong(TAG_IMPORT_VALUE));
+        syncedExportValue = Math.max(0L, tag.getLong(TAG_EXPORT_VALUE));
     }
 
     @Override
@@ -383,7 +451,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
         return null;
     }
 
-    private ItemStack createExportStack(Settlement settlement, int amount) {
+    private ItemStack createExportStack(Settlement settlement, int amount, int unitPrice) {
         if (amount <= 0 || operatingMode == OperatingMode.INTAKE) {
             return ItemStack.EMPTY;
         }
@@ -392,7 +460,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 operatingMode == OperatingMode.EXPORT_BREAD ? Items.BREAD : Items.BRICK,
                 amount
         );
-        stack.getOrCreateTag().putUUID(TAG_EXPORT_ORIGIN, settlement.getId());
+        CompoundTag tag = stack.getOrCreateTag();
+        tag.putUUID(TAG_EXPORT_ORIGIN, settlement.getId());
+        tag.putInt(TAG_EXPORT_UNIT_PRICE, Math.max(1, unitPrice));
         return stack;
     }
 
@@ -441,7 +511,8 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 return ItemStack.EMPTY;
             }
 
-            return createExportStack(settlement, Math.min(64, exportAvailable(settlement)));
+            int unitPrice = savedData.getCommodityUnitPrice(settlement, exportIndustryType());
+            return createExportStack(settlement, Math.min(64, exportAvailable(settlement)), unitPrice);
         }
 
         @Override
@@ -465,8 +536,20 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 return stack;
             }
 
+            IndustryType industryType = industryTypeFor(stack);
+            UUID originSettlementId = getDomesticTradeOrigin(stack);
+            int unitPrice = getDomesticTradeUnitPrice(stack);
             int capacity = remainingCapacity(settlement, stack);
             int accepted = Math.min(capacity, stack.getCount());
+            if (originSettlementId != null && !originSettlementId.equals(settlement.getId())) {
+                accepted = Math.min(accepted, savedData.getAffordableDomesticImportAmount(
+                        originSettlementId,
+                        settlement,
+                        industryType,
+                        unitPrice,
+                        accepted
+                ));
+            }
             if (accepted <= 0) {
                 return stack;
             }
@@ -474,15 +557,14 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
             if (!simulate) {
                 accepted = deliver(settlement, stack, accepted);
                 if (accepted > 0) {
-                    IndustryType industryType = industryTypeFor(stack);
                     long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
-                    UUID originSettlementId = getDomesticTradeOrigin(stack);
                     if (originSettlementId != null) {
                         savedData.recordDomesticImport(
                                 originSettlementId,
                                 settlement,
                                 industryType,
                                 accepted,
+                                unitPrice,
                                 currentDay
                         );
                     } else {
@@ -549,8 +631,9 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
                 return ItemStack.EMPTY;
             }
 
+            int unitPrice = savedData.getCommodityUnitPrice(settlement, exportIndustryType());
             if (simulate) {
-                return createExportStack(settlement, requested);
+                return createExportStack(settlement, requested, unitPrice);
             }
 
             int removed = withdrawExport(settlement, requested);
@@ -562,7 +645,7 @@ public final class FreightDepotBlockEntity extends SmartBlockEntity implements I
             savedData.recordDomesticExport(settlement, exportIndustryType(), removed, currentDay);
             savedData.setDirty();
             refreshGoggleState();
-            return createExportStack(settlement, removed);
+            return createExportStack(settlement, removed, unitPrice);
         }
 
         @Override

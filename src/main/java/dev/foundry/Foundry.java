@@ -1,5 +1,6 @@
 package dev.foundry;
 
+import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModBlocks;
 import dev.foundry.registry.ModItems;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -17,6 +18,7 @@ public final class Foundry {
 
         ModBlocks.register(modEventBus);
         ModItems.register(modEventBus);
+        ModBlockEntities.register(modEventBus);
         modEventBus.addListener(this::addCreativeTabContents);
     }
 

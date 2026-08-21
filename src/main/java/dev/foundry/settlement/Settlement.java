@@ -31,6 +31,7 @@ public final class Settlement {
     private static final String TAG_PROSPERITY = "Prosperity";
     private static final String TAG_FOOD_JOB_CAPACITY = "FoodJobCapacity";
     private static final String TAG_CONSTRUCTION_JOB_CAPACITY = "ConstructionJobCapacity";
+    private static final String TAG_LABOR_PRIORITY = "LaborPriority";
     private static final String TAG_HISTORY = "History";
 
     private final UUID id;
@@ -43,10 +44,11 @@ public final class Settlement {
     private int prosperity;
     private int foodJobCapacity;
     private int constructionJobCapacity;
+    private LaborPriority laborPriority;
 
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
                        int buildingMaterialsSupplied, int prosperity, int foodJobCapacity,
-                       int constructionJobCapacity, List<HistoryPoint> history) {
+                       int constructionJobCapacity, LaborPriority laborPriority, List<HistoryPoint> history) {
         this.id = id;
         this.dimension = dimension;
         this.townHallPos = townHallPos;
@@ -56,6 +58,7 @@ public final class Settlement {
         this.prosperity = prosperity;
         this.foodJobCapacity = Math.max(0, foodJobCapacity);
         this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
+        this.laborPriority = laborPriority == null ? LaborPriority.BALANCED : laborPriority;
         this.history = new ArrayList<>(history);
         trimHistory();
     }
@@ -71,6 +74,7 @@ public final class Settlement {
                 0,
                 0,
                 0,
+                LaborPriority.BALANCED,
                 List.of()
         );
     }
@@ -82,6 +86,10 @@ public final class Settlement {
             history.add(HistoryPoint.load(historyTag.getCompound(i)));
         }
 
+        LaborPriority laborPriority = tag.contains(TAG_LABOR_PRIORITY, Tag.TAG_STRING)
+                ? LaborPriority.fromSerializedName(tag.getString(TAG_LABOR_PRIORITY))
+                : LaborPriority.BALANCED;
+
         return new Settlement(
                 tag.getUUID(TAG_ID),
                 tag.getString(TAG_DIMENSION),
@@ -92,6 +100,7 @@ public final class Settlement {
                 tag.getInt(TAG_PROSPERITY),
                 tag.getInt(TAG_FOOD_JOB_CAPACITY),
                 tag.getInt(TAG_CONSTRUCTION_JOB_CAPACITY),
+                laborPriority,
                 history
         );
     }
@@ -107,6 +116,7 @@ public final class Settlement {
         tag.putInt(TAG_PROSPERITY, prosperity);
         tag.putInt(TAG_FOOD_JOB_CAPACITY, foodJobCapacity);
         tag.putInt(TAG_CONSTRUCTION_JOB_CAPACITY, constructionJobCapacity);
+        tag.putString(TAG_LABOR_PRIORITY, laborPriority.serializedName());
 
         ListTag historyTag = new ListTag();
         for (HistoryPoint historyPoint : history) {
@@ -267,12 +277,51 @@ public final class Settlement {
     }
 
     public int getFoodEmployed() {
-        return Math.min(foodJobCapacity, getWorkforce());
+        return employmentAllocation().food();
     }
 
     public int getConstructionEmployed() {
-        int remainingWorkforce = Math.max(0, getWorkforce() - getFoodEmployed());
-        return Math.min(constructionJobCapacity, remainingWorkforce);
+        return employmentAllocation().construction();
+    }
+
+    private EmploymentAllocation employmentAllocation() {
+        int totalEmployed = getEmployed();
+        if (totalEmployed <= 0) {
+            return new EmploymentAllocation(0, 0);
+        }
+
+        if (laborPriority == LaborPriority.FOOD) {
+            int food = Math.min(foodJobCapacity, totalEmployed);
+            int construction = Math.min(constructionJobCapacity, totalEmployed - food);
+            return new EmploymentAllocation(food, construction);
+        }
+
+        if (laborPriority == LaborPriority.CONSTRUCTION) {
+            int construction = Math.min(constructionJobCapacity, totalEmployed);
+            int food = Math.min(foodJobCapacity, totalEmployed - construction);
+            return new EmploymentAllocation(food, construction);
+        }
+
+        int totalJobs = getTotalJobCapacity();
+        if (totalJobs <= 0) {
+            return new EmploymentAllocation(0, 0);
+        }
+
+        int food = (int) (((long) totalEmployed * foodJobCapacity + totalJobs / 2L) / totalJobs);
+        food = Math.min(foodJobCapacity, Math.max(0, food));
+        int construction = Math.min(constructionJobCapacity, Math.max(0, totalEmployed - food));
+        int remaining = totalEmployed - food - construction;
+
+        if (remaining > 0) {
+            int extraFood = Math.min(foodJobCapacity - food, remaining);
+            food += extraFood;
+            remaining -= extraFood;
+        }
+        if (remaining > 0) {
+            construction += Math.min(constructionJobCapacity - construction, remaining);
+        }
+
+        return new EmploymentAllocation(food, construction);
     }
 
     public int getIndustryJobCapacity(IndustryType type) {
@@ -306,6 +355,15 @@ public final class Settlement {
     void setIndustryJobCapacity(int foodJobCapacity, int constructionJobCapacity) {
         this.foodJobCapacity = Math.max(0, foodJobCapacity);
         this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
+    }
+
+    public LaborPriority getLaborPriority() {
+        return laborPriority;
+    }
+
+    public LaborPriority cycleLaborPriority() {
+        laborPriority = laborPriority.next();
+        return laborPriority;
     }
 
     public boolean isSupplied() {
@@ -368,6 +426,9 @@ public final class Settlement {
 
     public List<HistoryPoint> getHistory() {
         return Collections.unmodifiableList(history);
+    }
+
+    private record EmploymentAllocation(int food, int construction) {
     }
 
     public record HistoryPoint(

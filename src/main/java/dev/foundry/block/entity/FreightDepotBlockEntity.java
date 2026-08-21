@@ -133,7 +133,7 @@ public final class FreightDepotBlockEntity extends BlockEntity implements IHaveG
 
         tooltip.add(Component.literal("  Linked settlement").withStyle(ChatFormatting.GREEN));
         tooltip.add(valueLine("Population", syncedPopulation, ChatFormatting.AQUA));
-        tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget)
+        tooltip.add(stockLine("Bread", syncedBreadSupplied, syncedBreadTarget).copy()
                 .append(Component.literal("  -" + syncedDailyBread + "/day").withStyle(ChatFormatting.DARK_GRAY)));
         tooltip.add(stockLine("Bricks", syncedMaterialsSupplied, syncedMaterialsTarget));
         tooltip.add(valueLine("Prosperity", syncedProsperity, ChatFormatting.GOLD));

@@ -16,6 +16,7 @@ public final class Settlement {
     public static final int DEFAULT_POPULATION = 120;
     public static final int HISTORY_LIMIT = 30;
     public static final int GROWTH_PROSPERITY_THRESHOLD = 3;
+    public static final int LABOR_FORCE_PERCENT = 50;
     private static final int BASE_BREAD_TARGET = 64;
     private static final int BASE_DAILY_BREAD_CONSUMPTION = 16;
     private static final int BASE_BUILDING_MATERIAL_TARGET = 32;
@@ -28,6 +29,8 @@ public final class Settlement {
     private static final String TAG_BREAD_SUPPLIED = "BreadSupplied";
     private static final String TAG_BUILDING_MATERIALS_SUPPLIED = "BuildingMaterialsSupplied";
     private static final String TAG_PROSPERITY = "Prosperity";
+    private static final String TAG_FOOD_JOB_CAPACITY = "FoodJobCapacity";
+    private static final String TAG_CONSTRUCTION_JOB_CAPACITY = "ConstructionJobCapacity";
     private static final String TAG_HISTORY = "History";
 
     private final UUID id;
@@ -38,9 +41,12 @@ public final class Settlement {
     private int breadSupplied;
     private int buildingMaterialsSupplied;
     private int prosperity;
+    private int foodJobCapacity;
+    private int constructionJobCapacity;
 
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
-                       int buildingMaterialsSupplied, int prosperity, List<HistoryPoint> history) {
+                       int buildingMaterialsSupplied, int prosperity, int foodJobCapacity,
+                       int constructionJobCapacity, List<HistoryPoint> history) {
         this.id = id;
         this.dimension = dimension;
         this.townHallPos = townHallPos;
@@ -48,6 +54,8 @@ public final class Settlement {
         this.breadSupplied = breadSupplied;
         this.buildingMaterialsSupplied = buildingMaterialsSupplied;
         this.prosperity = prosperity;
+        this.foodJobCapacity = Math.max(0, foodJobCapacity);
+        this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
         this.history = new ArrayList<>(history);
         trimHistory();
     }
@@ -58,6 +66,8 @@ public final class Settlement {
                 dimension.location().toString(),
                 townHallPos.asLong(),
                 DEFAULT_POPULATION,
+                0,
+                0,
                 0,
                 0,
                 0,
@@ -80,6 +90,8 @@ public final class Settlement {
                 tag.getInt(TAG_BREAD_SUPPLIED),
                 tag.getInt(TAG_BUILDING_MATERIALS_SUPPLIED),
                 tag.getInt(TAG_PROSPERITY),
+                tag.getInt(TAG_FOOD_JOB_CAPACITY),
+                tag.getInt(TAG_CONSTRUCTION_JOB_CAPACITY),
                 history
         );
     }
@@ -93,6 +105,8 @@ public final class Settlement {
         tag.putInt(TAG_BREAD_SUPPLIED, breadSupplied);
         tag.putInt(TAG_BUILDING_MATERIALS_SUPPLIED, buildingMaterialsSupplied);
         tag.putInt(TAG_PROSPERITY, prosperity);
+        tag.putInt(TAG_FOOD_JOB_CAPACITY, foodJobCapacity);
+        tag.putInt(TAG_CONSTRUCTION_JOB_CAPACITY, constructionJobCapacity);
 
         ListTag historyTag = new ListTag();
         for (HistoryPoint historyPoint : history) {
@@ -222,6 +236,48 @@ public final class Settlement {
         long scaled = ((long) Math.max(population, 1) * baseAmount + DEFAULT_POPULATION - 1L)
                 / DEFAULT_POPULATION;
         return (int) Math.max(1L, scaled);
+    }
+
+    public int getWorkforce() {
+        return Math.max(1, (population * LABOR_FORCE_PERCENT + 99) / 100);
+    }
+
+    public int getEmployed() {
+        return Math.min(getWorkforce(), getTotalJobCapacity());
+    }
+
+    public int getUnemployed() {
+        return Math.max(0, getWorkforce() - getEmployed());
+    }
+
+    public int getVacancies() {
+        return Math.max(0, getTotalJobCapacity() - getEmployed());
+    }
+
+    public int getTotalJobCapacity() {
+        return foodJobCapacity + constructionJobCapacity;
+    }
+
+    public int getFoodJobCapacity() {
+        return foodJobCapacity;
+    }
+
+    public int getConstructionJobCapacity() {
+        return constructionJobCapacity;
+    }
+
+    public int getFoodEmployed() {
+        return Math.min(foodJobCapacity, getWorkforce());
+    }
+
+    public int getConstructionEmployed() {
+        int remainingWorkforce = Math.max(0, getWorkforce() - getFoodEmployed());
+        return Math.min(constructionJobCapacity, remainingWorkforce);
+    }
+
+    void setIndustryJobCapacity(int foodJobCapacity, int constructionJobCapacity) {
+        this.foodJobCapacity = Math.max(0, foodJobCapacity);
+        this.constructionJobCapacity = Math.max(0, constructionJobCapacity);
     }
 
     public boolean isSupplied() {

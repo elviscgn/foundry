@@ -34,12 +34,14 @@ public final class Settlement {
     private static final String TAG_LABOR_PRIORITY = "LaborPriority";
     private static final String TAG_HISTORY = "History";
     private static final String TAG_PRODUCTION_HISTORY = "ProductionHistory";
+    private static final String TAG_TRADE_HISTORY = "TradeHistory";
 
     private final UUID id;
     private final String dimension;
     private final long townHallPos;
     private final List<HistoryPoint> history;
     private final List<ProductionPoint> productionHistory;
+    private final List<TradePoint> tradeHistory;
     private int population;
     private int breadSupplied;
     private int buildingMaterialsSupplied;
@@ -51,7 +53,7 @@ public final class Settlement {
     private Settlement(UUID id, String dimension, long townHallPos, int population, int breadSupplied,
                        int buildingMaterialsSupplied, int prosperity, int foodJobCapacity,
                        int constructionJobCapacity, LaborPriority laborPriority, List<HistoryPoint> history,
-                       List<ProductionPoint> productionHistory) {
+                       List<ProductionPoint> productionHistory, List<TradePoint> tradeHistory) {
         this.id = id;
         this.dimension = dimension;
         this.townHallPos = townHallPos;
@@ -64,8 +66,10 @@ public final class Settlement {
         this.laborPriority = laborPriority == null ? LaborPriority.BALANCED : laborPriority;
         this.history = new ArrayList<>(history);
         this.productionHistory = new ArrayList<>(productionHistory);
+        this.tradeHistory = new ArrayList<>(tradeHistory);
         trimHistory();
         trimProductionHistory();
+        trimTradeHistory();
     }
 
     public static Settlement create(ResourceKey<Level> dimension, BlockPos townHallPos) {
@@ -80,6 +84,7 @@ public final class Settlement {
                 0,
                 0,
                 LaborPriority.BALANCED,
+                List.of(),
                 List.of(),
                 List.of()
         );
@@ -98,6 +103,12 @@ public final class Settlement {
             productionHistory.add(ProductionPoint.load(productionTag.getCompound(i)));
         }
 
+        List<TradePoint> tradeHistory = new ArrayList<>();
+        ListTag tradeTag = tag.getList(TAG_TRADE_HISTORY, Tag.TAG_COMPOUND);
+        for (int i = 0; i < tradeTag.size(); i++) {
+            tradeHistory.add(TradePoint.load(tradeTag.getCompound(i)));
+        }
+
         LaborPriority laborPriority = tag.contains(TAG_LABOR_PRIORITY, Tag.TAG_STRING)
                 ? LaborPriority.fromSerializedName(tag.getString(TAG_LABOR_PRIORITY))
                 : LaborPriority.BALANCED;
@@ -114,7 +125,8 @@ public final class Settlement {
                 tag.getInt(TAG_CONSTRUCTION_JOB_CAPACITY),
                 laborPriority,
                 history,
-                productionHistory
+                productionHistory,
+                tradeHistory
         );
     }
 
@@ -142,6 +154,12 @@ public final class Settlement {
             productionTag.add(productionPoint.save());
         }
         tag.put(TAG_PRODUCTION_HISTORY, productionTag);
+
+        ListTag tradeTag = new ListTag();
+        for (TradePoint tradePoint : tradeHistory) {
+            tradeTag.add(tradePoint.save());
+        }
+        tag.put(TAG_TRADE_HISTORY, tradeTag);
         return tag;
     }
 
@@ -167,6 +185,22 @@ public final class Settlement {
 
         buildingMaterialsSupplied += accepted;
         return accepted;
+    }
+
+    public int withdrawBread(int requested) {
+        int removed = Math.min(Math.max(requested, 0), breadSupplied);
+        if (removed > 0) {
+            breadSupplied -= removed;
+        }
+        return removed;
+    }
+
+    public int withdrawBuildingMaterials(int requested) {
+        int removed = Math.min(Math.max(requested, 0), buildingMaterialsSupplied);
+        if (removed > 0) {
+            buildingMaterialsSupplied -= removed;
+        }
+        return removed;
     }
 
     public boolean consumeBreadForDays(long daysElapsed) {
@@ -307,6 +341,84 @@ public final class Settlement {
         }
     }
 
+    public void ensureTradeDay(long day) {
+        if (!tradeHistory.isEmpty() && day < tradeHistory.get(tradeHistory.size() - 1).day()) {
+            resetTradeHistory(day);
+            return;
+        }
+
+        if (tradeHistory.isEmpty()) {
+            tradeHistory.add(TradePoint.empty(day));
+            return;
+        }
+
+        long lastDay = tradeHistory.get(tradeHistory.size() - 1).day();
+        if (lastDay == day) {
+            return;
+        }
+
+        long firstMissingDay = lastDay + 1L;
+        if (day - firstMissingDay + 1L > HISTORY_LIMIT) {
+            tradeHistory.clear();
+            firstMissingDay = day - HISTORY_LIMIT + 1L;
+        }
+
+        for (long missingDay = firstMissingDay; missingDay <= day; missingDay++) {
+            tradeHistory.add(TradePoint.empty(missingDay));
+        }
+        trimTradeHistory();
+    }
+
+    public void resetTradeHistory(long day) {
+        tradeHistory.clear();
+        tradeHistory.add(TradePoint.empty(day));
+    }
+
+    public void recordTradeImport(long day, IndustryType type, int amount) {
+        updateTrade(day, type, Math.max(0, amount), 0);
+    }
+
+    public void recordTradeExport(long day, IndustryType type, int amount) {
+        updateTrade(day, type, 0, Math.max(0, amount));
+    }
+
+    private void updateTrade(long day, IndustryType type, int imported, int exported) {
+        if (type == null || (imported <= 0 && exported <= 0)) {
+            return;
+        }
+
+        ensureTradeDay(day);
+        int index = tradeHistory.size() - 1;
+        TradePoint current = tradeHistory.get(index);
+        if (current.day() != day) {
+            return;
+        }
+
+        if (type == IndustryType.BAKERY) {
+            tradeHistory.set(index, new TradePoint(
+                    day,
+                    current.breadImports() + imported,
+                    current.breadExports() + exported,
+                    current.brickImports(),
+                    current.brickExports()
+            ));
+        } else if (type == IndustryType.BRICKWORKS) {
+            tradeHistory.set(index, new TradePoint(
+                    day,
+                    current.breadImports(),
+                    current.breadExports(),
+                    current.brickImports() + imported,
+                    current.brickExports() + exported
+            ));
+        }
+    }
+
+    private void trimTradeHistory() {
+        while (tradeHistory.size() > HISTORY_LIMIT) {
+            tradeHistory.remove(0);
+        }
+    }
+
     public int getFoodOutputToday() {
         return productionHistory.isEmpty() ? 0 : productionHistory.get(productionHistory.size() - 1).foodOutput();
     }
@@ -333,6 +445,57 @@ public final class Settlement {
         for (int i = productionHistory.size() - count; i < productionHistory.size(); i++) {
             ProductionPoint point = productionHistory.get(i);
             total += food ? point.foodOutput() : point.constructionOutput();
+        }
+        return (int) ((total + count / 2L) / count);
+    }
+
+    public int getBreadImportsToday() {
+        return tradeHistory.isEmpty() ? 0 : tradeHistory.get(tradeHistory.size() - 1).breadImports();
+    }
+
+    public int getBreadExportsToday() {
+        return tradeHistory.isEmpty() ? 0 : tradeHistory.get(tradeHistory.size() - 1).breadExports();
+    }
+
+    public int getBrickImportsToday() {
+        return tradeHistory.isEmpty() ? 0 : tradeHistory.get(tradeHistory.size() - 1).brickImports();
+    }
+
+    public int getBrickExportsToday() {
+        return tradeHistory.isEmpty() ? 0 : tradeHistory.get(tradeHistory.size() - 1).brickExports();
+    }
+
+    public int getBreadImportsAverage(int days) {
+        return tradeAverage(days, 0);
+    }
+
+    public int getBreadExportsAverage(int days) {
+        return tradeAverage(days, 1);
+    }
+
+    public int getBrickImportsAverage(int days) {
+        return tradeAverage(days, 2);
+    }
+
+    public int getBrickExportsAverage(int days) {
+        return tradeAverage(days, 3);
+    }
+
+    private int tradeAverage(int days, int metric) {
+        if (days <= 0 || tradeHistory.isEmpty()) {
+            return 0;
+        }
+
+        int count = Math.min(days, tradeHistory.size());
+        long total = 0L;
+        for (int i = tradeHistory.size() - count; i < tradeHistory.size(); i++) {
+            TradePoint point = tradeHistory.get(i);
+            total += switch (metric) {
+                case 0 -> point.breadImports();
+                case 1 -> point.breadExports();
+                case 2 -> point.brickImports();
+                default -> point.brickExports();
+            };
         }
         return (int) ((total + count / 2L) / count);
     }
@@ -547,6 +710,10 @@ public final class Settlement {
         return Collections.unmodifiableList(productionHistory);
     }
 
+    public List<TradePoint> getTradeHistory() {
+        return Collections.unmodifiableList(tradeHistory);
+    }
+
     private record EmploymentAllocation(int food, int construction) {
     }
 
@@ -610,6 +777,38 @@ public final class Settlement {
             tag.putLong(TAG_DAY, day);
             tag.putInt(TAG_FOOD_OUTPUT, foodOutput);
             tag.putInt(TAG_CONSTRUCTION_OUTPUT, constructionOutput);
+            return tag;
+        }
+    }
+
+    public record TradePoint(long day, int breadImports, int breadExports, int brickImports, int brickExports) {
+        private static final String TAG_DAY = "Day";
+        private static final String TAG_BREAD_IMPORTS = "BreadImports";
+        private static final String TAG_BREAD_EXPORTS = "BreadExports";
+        private static final String TAG_BRICK_IMPORTS = "BrickImports";
+        private static final String TAG_BRICK_EXPORTS = "BrickExports";
+
+        static TradePoint empty(long day) {
+            return new TradePoint(day, 0, 0, 0, 0);
+        }
+
+        static TradePoint load(CompoundTag tag) {
+            return new TradePoint(
+                    tag.getLong(TAG_DAY),
+                    Math.max(0, tag.getInt(TAG_BREAD_IMPORTS)),
+                    Math.max(0, tag.getInt(TAG_BREAD_EXPORTS)),
+                    Math.max(0, tag.getInt(TAG_BRICK_IMPORTS)),
+                    Math.max(0, tag.getInt(TAG_BRICK_EXPORTS))
+            );
+        }
+
+        CompoundTag save() {
+            CompoundTag tag = new CompoundTag();
+            tag.putLong(TAG_DAY, day);
+            tag.putInt(TAG_BREAD_IMPORTS, breadImports);
+            tag.putInt(TAG_BREAD_EXPORTS, breadExports);
+            tag.putInt(TAG_BRICK_IMPORTS, brickImports);
+            tag.putInt(TAG_BRICK_EXPORTS, brickExports);
             return tag;
         }
     }

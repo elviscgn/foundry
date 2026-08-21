@@ -2,6 +2,7 @@ package dev.foundry.block;
 
 import dev.foundry.block.entity.FreightDepotBlockEntity;
 import dev.foundry.registry.ModBlockEntities;
+import dev.foundry.settlement.IndustryType;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.ChatFormatting;
@@ -23,7 +24,11 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
+import java.util.UUID;
+
 public final class FreightDepotBlock extends BaseEntityBlock {
+    private static final long TICKS_PER_DAY = 24_000L;
+
     public FreightDepotBlock(Properties properties) {
         super(properties);
     }
@@ -79,7 +84,10 @@ public final class FreightDepotBlock extends BaseEntityBlock {
             settlement = savedData.linkDepot(serverLevel.dimension(), pos);
         }
 
-        if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+        FreightDepotBlockEntity depot = serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity foundryDepot
+                ? foundryDepot
+                : null;
+        if (depot != null) {
             depot.refreshGoggleState();
         }
 
@@ -105,37 +113,59 @@ public final class FreightDepotBlock extends BaseEntityBlock {
                                 .withStyle(result.success() ? ChatFormatting.GREEN : ChatFormatting.RED),
                         false
                 );
-                if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+                if (depot != null) {
                     depot.refreshGoggleState();
                 }
                 return InteractionResult.CONSUME;
             }
+
+            if (depot != null) {
+                String mode = depot.cycleOperatingMode();
+                player.displayClientMessage(
+                        Component.literal("Freight Depot // MODE " + mode.toUpperCase())
+                                .withStyle(ChatFormatting.GOLD),
+                        true
+                );
+                depot.refreshGoggleState();
+            }
+            return InteractionResult.CONSUME;
         }
 
         int accepted = 0;
         String commodity = null;
+        IndustryType industryType = null;
 
-        if (heldStack.is(Items.BREAD)) {
-            accepted = settlement.deliverBread(heldStack.getCount());
-            commodity = "bread";
-        } else if (heldStack.is(Items.BRICK)) {
-            accepted = settlement.deliverBuildingMaterials(heldStack.getCount());
-            commodity = "bricks";
+        if (depot == null || depot.isIntakeMode()) {
+            if (heldStack.is(Items.BREAD)) {
+                accepted = settlement.deliverBread(heldStack.getCount());
+                commodity = "bread";
+                industryType = IndustryType.BAKERY;
+            } else if (heldStack.is(Items.BRICK)) {
+                accepted = settlement.deliverBuildingMaterials(heldStack.getCount());
+                commodity = "bricks";
+                industryType = IndustryType.BRICKWORKS;
+            }
         }
 
         if (accepted > 0 && commodity != null) {
+            UUID originSettlementId = FreightDepotBlockEntity.getDomesticTradeOrigin(heldStack);
+            if (originSettlementId != null) {
+                long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
+                savedData.recordDomesticImport(originSettlementId, settlement, industryType, accepted, currentDay);
+            }
+
             if (!player.getAbilities().instabuild) {
                 heldStack.shrink(accepted);
             }
             savedData.setDirty();
-            if (serverLevel.getBlockEntity(pos) instanceof FreightDepotBlockEntity depot) {
+            if (depot != null) {
                 depot.refreshGoggleState();
             }
             player.displayClientMessage(deliveryMessage(settlement, accepted, commodity), false);
             return InteractionResult.CONSUME;
         }
 
-        player.displayClientMessage(statusMessage(settlement), false);
+        player.displayClientMessage(statusMessage(settlement, depot == null ? "Intake" : depot.getOperatingModeLabel()), false);
         return InteractionResult.CONSUME;
     }
 
@@ -156,16 +186,20 @@ public final class FreightDepotBlock extends BaseEntityBlock {
                 .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }
 
-    private static Component statusMessage(Settlement settlement) {
+    private static Component statusMessage(Settlement settlement, String mode) {
         String growthState = settlement.isGrowthReady() ? "GROWTH READY" : "STABLE";
         ChatFormatting growthColor = settlement.isGrowthReady() ? ChatFormatting.GREEN : ChatFormatting.YELLOW;
 
-        return Component.literal("Freight Depot | Linked | Bread ")
+        return Component.literal("Freight Depot | " + mode + " | Bread ")
                 .withStyle(ChatFormatting.GOLD)
                 .append(Component.literal(settlement.getBreadSupplied() + "/" + settlement.getBreadTarget()))
                 .append(Component.literal(" (-" + settlement.getDailyBreadConsumption() + "/day)").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(" | Bricks " + settlement.getBuildingMaterialsSupplied()
                         + "/" + settlement.getBuildingMaterialsTarget()).withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(" | Trade B +" + settlement.getBreadImportsToday()
+                        + "/-" + settlement.getBreadExportsToday()).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal(" R +" + settlement.getBrickImportsToday()
+                        + "/-" + settlement.getBrickExportsToday()).withStyle(ChatFormatting.AQUA))
                 .append(Component.literal(" | " + growthState).withStyle(growthColor))
                 .append(Component.literal(" | Prosperity " + settlement.getProsperity()).withStyle(ChatFormatting.AQUA));
     }

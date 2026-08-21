@@ -91,6 +91,7 @@ public final class SettlementSavedData extends SavedData {
         if (lastProcessedDay >= 0L) {
             settlement.recordHistory(lastProcessedDay);
             settlement.ensureProductionDay(lastProcessedDay);
+            settlement.ensureTradeDay(lastProcessedDay);
         }
         settlementsById.put(settlement.getId(), settlement);
         settlementIdsByLocation.put(locationKey, settlement.getId());
@@ -345,6 +346,28 @@ public final class SettlementSavedData extends SavedData {
         return false;
     }
 
+    public void recordDomesticExport(Settlement origin, IndustryType type, int amount, long day) {
+        if (origin == null || type == null || amount <= 0) {
+            return;
+        }
+        origin.recordTradeExport(day, type, amount);
+        setDirty();
+    }
+
+    public boolean recordDomesticImport(UUID originSettlementId, Settlement destination,
+                                        IndustryType type, int amount, long day) {
+        if (originSettlementId == null || destination == null || type == null || amount <= 0) {
+            return false;
+        }
+        if (originSettlementId.equals(destination.getId())) {
+            return false;
+        }
+
+        destination.recordTradeImport(day, type, amount);
+        setDirty();
+        return true;
+    }
+
     public int getIndustryStaffingSignal(ResourceKey<Level> dimension, BlockPos industryPos) {
         IndustrySite site = industrySitesByLocation.get(Settlement.locationKey(dimension, industryPos));
         if (site == null) {
@@ -424,6 +447,7 @@ public final class SettlementSavedData extends SavedData {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.recordHistory(currentDay);
                 settlement.ensureProductionDay(currentDay);
+                settlement.ensureTradeDay(currentDay);
             }
             setDirty();
             return 0L;
@@ -434,6 +458,7 @@ public final class SettlementSavedData extends SavedData {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.resetHistory(currentDay);
                 settlement.resetProductionHistory(currentDay);
+                settlement.resetTradeHistory(currentDay);
             }
             setDirty();
             return 0L;
@@ -442,6 +467,7 @@ public final class SettlementSavedData extends SavedData {
         if (currentDay == lastProcessedDay) {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.ensureProductionDay(currentDay);
+                settlement.ensureTradeDay(currentDay);
             }
             return 0L;
         }
@@ -453,6 +479,7 @@ public final class SettlementSavedData extends SavedData {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.advanceEconomyForDays(skippedDays);
                 settlement.ensureProductionDay(skippedToDay);
+                settlement.ensureTradeDay(skippedToDay);
             }
         }
 
@@ -462,6 +489,7 @@ public final class SettlementSavedData extends SavedData {
                 settlement.advanceEconomyForDay();
                 settlement.recordHistory(day);
                 settlement.ensureProductionDay(day);
+                settlement.ensureTradeDay(day);
             }
         }
 

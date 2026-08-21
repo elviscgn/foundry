@@ -35,7 +35,7 @@ public final class SettlementScreen extends Screen {
         renderBackground(guiGraphics);
 
         int panelWidth = Math.min(620, Math.max(1, width - 20));
-        int panelHeight = Math.min(350, Math.max(1, height - 20));
+        int panelHeight = Math.min(390, Math.max(1, height - 20));
         int panelX = (width - panelWidth) / 2;
         int panelY = (height - panelHeight) / 2;
         int padding = panelWidth < 420 ? 10 : 14;
@@ -134,6 +134,12 @@ public final class SettlementScreen extends Screen {
                 + snapshot.foodOutputAverage7d() + "/day 7d";
         String constructionOutput = "Construction output  " + snapshot.constructionOutputToday() + " today  "
                 + snapshot.constructionOutputAverage7d() + "/day 7d";
+        String tradeToday = "Domestic trade today  Bread +" + snapshot.breadImportsToday()
+                + "/-" + snapshot.breadExportsToday()
+                + "   Bricks +" + snapshot.brickImportsToday() + "/-" + snapshot.brickExportsToday();
+        String tradeAverage = "Trade 7d avg  Bread +" + snapshot.breadImportsAverage7d()
+                + "/-" + snapshot.breadExportsAverage7d()
+                + "   Bricks +" + snapshot.brickImportsAverage7d() + "/-" + snapshot.brickExportsAverage7d();
 
         int row = 0;
         guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
@@ -196,6 +202,18 @@ public final class SettlementScreen extends Screen {
             guiGraphics.drawString(font, Component.literal(constructionOutput), x, y + row,
                     snapshot.constructionOutputToday() > 0 ? STEEL : MUTED_TEXT);
         }
+
+        row += 14;
+        boolean tradedToday = snapshot.breadImportsToday() + snapshot.breadExportsToday()
+                + snapshot.brickImportsToday() + snapshot.brickExportsToday() > 0;
+        guiGraphics.drawString(font, Component.literal(tradeToday), x, y + row,
+                tradedToday ? GOLD : MUTED_TEXT);
+
+        row += 14;
+        boolean tradedRecently = snapshot.breadImportsAverage7d() + snapshot.breadExportsAverage7d()
+                + snapshot.brickImportsAverage7d() + snapshot.brickExportsAverage7d() > 0;
+        guiGraphics.drawString(font, Component.literal(tradeAverage), x, y + row,
+                tradedRecently ? STEEL : MUTED_TEXT);
         return row + 14;
     }
 

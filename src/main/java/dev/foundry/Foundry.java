@@ -28,6 +28,8 @@ public final class Foundry {
         if (event.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             event.accept(ModItems.TOWN_HALL.get());
             event.accept(ModItems.FREIGHT_DEPOT.get());
+            event.accept(ModItems.BAKERY.get());
+            event.accept(ModItems.BRICKWORKS.get());
         }
     }
 }

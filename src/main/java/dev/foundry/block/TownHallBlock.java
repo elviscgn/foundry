@@ -14,20 +14,18 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 
 public final class TownHallBlock extends Block {
-    public TownHallBlock(Properties properties) {
-        super(properties);
-    }
+    public TownHallBlock(Properties properties) { super(properties); }
 
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
-
         if (level instanceof ServerLevel serverLevel) {
             SettlementSavedData.get(serverLevel).getOrCreate(serverLevel.dimension(), pos);
         }
@@ -36,10 +34,7 @@ public final class TownHallBlock extends Block {
     @Override
     public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
                                  InteractionHand hand, BlockHitResult hit) {
-        if (level.isClientSide) {
-            return InteractionResult.SUCCESS;
-        }
-
+        if (level.isClientSide) return InteractionResult.SUCCESS;
         if (!(level instanceof ServerLevel serverLevel) || !(player instanceof ServerPlayer serverPlayer)) {
             return InteractionResult.CONSUME;
         }
@@ -47,24 +42,34 @@ public final class TownHallBlock extends Block {
         SettlementSavedData data = SettlementSavedData.get(serverLevel);
         Settlement settlement = data.getOrCreate(serverLevel.dimension(), pos);
         SettlementTier tier = data.getSettlementTier(settlement);
-        String settlementLabel = SettlementIdentity.label(settlement, tier);
 
+        ItemStack held = serverPlayer.getItemInHand(hand);
+        if (held.is(Items.NAME_TAG) && held.hasCustomHoverName()) {
+            String requestedName = held.getHoverName().getString();
+            settlement.setCustomName(requestedName);
+            data.setDirty();
+            if (!serverPlayer.getAbilities().instabuild) held.shrink(1);
+            serverPlayer.displayClientMessage(
+                    Component.literal("CIVIC REGISTER // Settlement renamed // " + SettlementIdentity.label(settlement, tier)),
+                    true
+            );
+            return InteractionResult.CONSUME;
+        }
+
+        String settlementLabel = SettlementIdentity.label(settlement, tier);
         if (serverPlayer.isShiftKeyDown()) {
             settlement.cycleLaborPriority();
             data.setDirty();
             data.refreshIndustrySignals(serverLevel.getServer());
             serverPlayer.displayClientMessage(
-                    Component.literal(settlementLabel + " // Labor priority // "
-                            + settlement.getLaborPriority().displayName()),
+                    Component.literal(settlementLabel + " // Labor priority // " + settlement.getLaborPriority().displayName()),
                     true
             );
             return InteractionResult.CONSUME;
         }
 
         serverPlayer.displayClientMessage(
-                Component.literal(settlementLabel + " // Territory radius " + tier.claimRadius() + " blocks"),
-                true
-        );
+                Component.literal(settlementLabel + " // Territory radius " + tier.claimRadius() + " blocks"), true);
         FoundryNetwork.sendSettlementSnapshot(serverPlayer, settlement);
         return InteractionResult.CONSUME;
     }
@@ -72,9 +77,8 @@ public final class TownHallBlock extends Block {
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         // The Town Hall is a civic control surface, not the settlement itself. Demolishing or
-        // temporarily moving the block must not erase the population, economy, finances,
-        // industry/depot links, or invalidate freight already in transit. A future explicit
-        // abandon/dissolve action should be responsible for permanently deleting a settlement.
+        // temporarily moving the block must not erase population, finance, industry, storage,
+        // or invalidate freight already in transit. Dissolution will be an explicit action later.
         super.onRemove(state, level, pos, newState, isMoving);
     }
 }

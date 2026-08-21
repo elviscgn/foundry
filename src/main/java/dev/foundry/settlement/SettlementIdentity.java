@@ -2,11 +2,7 @@ package dev.foundry.settlement;
 
 import java.util.Locale;
 
-/**
- * Stable human-readable settlement labels until player-defined civic names arrive.
- * The short code comes from the persisted settlement UUID, so every linked worksite and
- * depot can identify exactly which settlement it belongs to without exposing a full UUID.
- */
+/** Stable civic identity shared by every Foundry system that refers to a settlement. */
 public final class SettlementIdentity {
     private SettlementIdentity() {
     }
@@ -15,9 +11,25 @@ public final class SettlementIdentity {
         if (settlement == null) {
             return "Unlinked";
         }
+        if (settlement.hasCustomName()) {
+            return settlement.getCustomName();
+        }
         SettlementTier effectiveTier = tier == null ? SettlementTier.HAMLET : tier;
+        return effectiveTier.displayName() + " " + shortCode(settlement);
+    }
+
+    public static String registryLabel(Settlement settlement, SettlementTier tier) {
+        if (settlement == null) {
+            return "Unlinked";
+        }
+        if (!settlement.hasCustomName()) {
+            return label(settlement, tier);
+        }
+        return settlement.getCustomName() + " [" + shortCode(settlement) + "]";
+    }
+
+    public static String shortCode(Settlement settlement) {
         String compactId = settlement.getId().toString().replace("-", "");
-        String shortCode = compactId.substring(0, Math.min(4, compactId.length())).toUpperCase(Locale.ROOT);
-        return effectiveTier.displayName() + " " + shortCode;
+        return compactId.substring(0, Math.min(4, compactId.length())).toUpperCase(Locale.ROOT);
     }
 }

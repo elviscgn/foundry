@@ -12,10 +12,9 @@ import java.util.UUID;
 /**
  * Monetary state for one settlement.
  *
- * Kora is conserved by all endogenous flows: domestic trade transfers liquidity between
- * settlements, while commercial taxes move Kora from the local economy into the municipal
- * treasury. Settlement creation/migration seeds the starting scenario balance; normal
- * simulation never mints Kora as a side effect of production, trade, or taxation.
+ * Kora is conserved by endogenous flows. Domestic trade transfers liquidity between local
+ * economies, taxes transfer local liquidity into the treasury, and public works transfer
+ * treasury money back into the local economy instead of deleting or minting currency.
  */
 public final class SettlementFinance {
     public static final String CURRENCY_NAME = "Kora";
@@ -64,21 +63,12 @@ public final class SettlementFinance {
     public static SettlementFinance load(CompoundTag tag) {
         List<FiscalPoint> history = new ArrayList<>();
         ListTag historyTag = tag.getList(TAG_HISTORY, Tag.TAG_COMPOUND);
-        for (int i = 0; i < historyTag.size(); i++) {
-            history.add(FiscalPoint.load(historyTag.getCompound(i)));
-        }
-
+        for (int i = 0; i < historyTag.size(); i++) history.add(FiscalPoint.load(historyTag.getCompound(i)));
         int taxPercent = tag.contains(TAG_COMMERCIAL_TAX_PERCENT, Tag.TAG_INT)
-                ? tag.getInt(TAG_COMMERCIAL_TAX_PERCENT)
-                : DEFAULT_COMMERCIAL_TAX_PERCENT;
-
-        return new SettlementFinance(
-                tag.getUUID(TAG_SETTLEMENT_ID),
+                ? tag.getInt(TAG_COMMERCIAL_TAX_PERCENT) : DEFAULT_COMMERCIAL_TAX_PERCENT;
+        return new SettlementFinance(tag.getUUID(TAG_SETTLEMENT_ID),
                 Math.max(0L, tag.getLong(TAG_LOCAL_LIQUIDITY)),
-                Math.max(0L, tag.getLong(TAG_TREASURY)),
-                taxPercent,
-                history
-        );
+                Math.max(0L, tag.getLong(TAG_TREASURY)), taxPercent, history);
     }
 
     public CompoundTag save() {
@@ -87,20 +77,14 @@ public final class SettlementFinance {
         tag.putLong(TAG_LOCAL_LIQUIDITY, localLiquidity);
         tag.putLong(TAG_TREASURY, treasuryBalance);
         tag.putInt(TAG_COMMERCIAL_TAX_PERCENT, commercialTaxPercent);
-
         ListTag historyTag = new ListTag();
-        for (FiscalPoint point : history) {
-            historyTag.add(point.save());
-        }
+        for (FiscalPoint point : history) historyTag.add(point.save());
         tag.put(TAG_HISTORY, historyTag);
         return tag;
     }
 
     public static int quoteUnitPrice(Settlement settlement, IndustryType type) {
-        if (settlement == null || type == null) {
-            return 1;
-        }
-
+        if (settlement == null || type == null) return 1;
         int basePrice;
         int supplied;
         int target;
@@ -113,7 +97,6 @@ public final class SettlementFinance {
             supplied = settlement.getBuildingMaterialsSupplied();
             target = settlement.getBuildingMaterialsTarget();
         }
-
         target = Math.max(1, target);
         int shortage = Math.max(0, target - supplied);
         int shortagePremium = (basePrice * shortage + target - 1) / target;
@@ -125,24 +108,20 @@ public final class SettlementFinance {
             resetHistory(day);
             return;
         }
-
         if (history.isEmpty()) {
             history.add(FiscalPoint.empty(day, localLiquidity, treasuryBalance));
             return;
         }
-
         long lastDay = history.get(history.size() - 1).day();
         if (lastDay == day) {
             refreshCurrentBalances(day);
             return;
         }
-
         long firstMissingDay = lastDay + 1L;
         if (day - firstMissingDay + 1L > Settlement.HISTORY_LIMIT) {
             history.clear();
             firstMissingDay = day - Settlement.HISTORY_LIMIT + 1L;
         }
-
         for (long missingDay = firstMissingDay; missingDay <= day; missingDay++) {
             history.add(FiscalPoint.empty(missingDay, localLiquidity, treasuryBalance));
         }
@@ -155,183 +134,105 @@ public final class SettlementFinance {
     }
 
     public void recordImport(long day, long value) {
-        if (value <= 0L) {
-            return;
-        }
+        if (value <= 0L) return;
         ensureDay(day);
         int index = history.size() - 1;
         FiscalPoint point = history.get(index);
-        history.set(index, new FiscalPoint(
-                day,
-                localLiquidity,
-                treasuryBalance,
-                point.importValue() + value,
-                point.exportValue(),
-                point.taxRevenue(),
-                point.publicSpending()
-        ));
+        history.set(index, new FiscalPoint(day, localLiquidity, treasuryBalance,
+                point.importValue() + value, point.exportValue(), point.taxRevenue(), point.publicSpending()));
     }
 
     public void recordExport(long day, long value, long taxRevenue) {
-        if (value <= 0L) {
-            return;
-        }
+        if (value <= 0L) return;
         ensureDay(day);
         int index = history.size() - 1;
         FiscalPoint point = history.get(index);
-        history.set(index, new FiscalPoint(
-                day,
-                localLiquidity,
-                treasuryBalance,
-                point.importValue(),
-                point.exportValue() + value,
-                point.taxRevenue() + Math.max(0L, taxRevenue),
-                point.publicSpending()
-        ));
+        history.set(index, new FiscalPoint(day, localLiquidity, treasuryBalance,
+                point.importValue(), point.exportValue() + value,
+                point.taxRevenue() + Math.max(0L, taxRevenue), point.publicSpending()));
     }
 
     public void recordPublicSpending(long day, long amount) {
-        if (amount <= 0L) {
-            return;
-        }
+        if (amount <= 0L) return;
         ensureDay(day);
         int index = history.size() - 1;
         FiscalPoint point = history.get(index);
-        history.set(index, new FiscalPoint(
-                day,
-                localLiquidity,
-                treasuryBalance,
-                point.importValue(),
-                point.exportValue(),
-                point.taxRevenue(),
-                point.publicSpending() + amount
-        ));
+        history.set(index, new FiscalPoint(day, localLiquidity, treasuryBalance,
+                point.importValue(), point.exportValue(), point.taxRevenue(), point.publicSpending() + amount));
+    }
+
+    /**
+     * Pays a municipal project from the treasury into the settlement's private/local economy.
+     * This is a transfer, not money destruction: total Kora before and after is identical.
+     */
+    public boolean spendTreasuryIntoLocalEconomy(long day, long amount) {
+        if (amount <= 0L) return true;
+        if (treasuryBalance < amount) return false;
+        long before = getTotalMoney();
+        treasuryBalance -= amount;
+        localLiquidity += amount;
+        recordPublicSpending(day, amount);
+        refreshCurrentBalances(day);
+        if (getTotalMoney() != before) {
+            throw new IllegalStateException("Kora conservation invariant violated during public spending");
+        }
+        return true;
     }
 
     private void refreshCurrentBalances(long day) {
-        if (history.isEmpty() || history.get(history.size() - 1).day() != day) {
-            return;
-        }
+        if (history.isEmpty() || history.get(history.size() - 1).day() != day) return;
         int index = history.size() - 1;
         FiscalPoint point = history.get(index);
-        history.set(index, new FiscalPoint(
-                point.day(),
-                localLiquidity,
-                treasuryBalance,
-                point.importValue(),
-                point.exportValue(),
-                point.taxRevenue(),
-                point.publicSpending()
-        ));
+        history.set(index, new FiscalPoint(point.day(), localLiquidity, treasuryBalance,
+                point.importValue(), point.exportValue(), point.taxRevenue(), point.publicSpending()));
     }
 
     private void trimHistory() {
-        while (history.size() > Settlement.HISTORY_LIMIT) {
-            history.remove(0);
-        }
+        while (history.size() > Settlement.HISTORY_LIMIT) history.remove(0);
     }
 
     public long calculateCommercialTax(long grossValue) {
-        if (grossValue <= 0L || commercialTaxPercent <= 0) {
-            return 0L;
-        }
+        if (grossValue <= 0L || commercialTaxPercent <= 0) return 0L;
         return grossValue * commercialTaxPercent / 100L;
     }
 
-    public boolean canDebitLocal(long amount) {
-        return amount >= 0L && localLiquidity >= amount;
-    }
+    public boolean canDebitLocal(long amount) { return amount >= 0L && localLiquidity >= amount; }
 
     public boolean debitLocal(long amount) {
-        if (!canDebitLocal(amount)) {
-            return false;
-        }
+        if (!canDebitLocal(amount)) return false;
         localLiquidity -= amount;
         return true;
     }
 
     public void creditLocal(long amount) {
-        if (amount > 0L) {
-            localLiquidity += amount;
-        }
+        if (amount > 0L) localLiquidity += amount;
     }
 
     public boolean moveLocalToTreasury(long amount) {
-        if (amount <= 0L) {
-            return true;
-        }
-        if (!debitLocal(amount)) {
-            return false;
-        }
+        if (amount <= 0L) return true;
+        if (!debitLocal(amount)) return false;
         treasuryBalance += amount;
         return true;
     }
 
-    public long getTotalMoney() {
-        return localLiquidity + treasuryBalance;
-    }
-
-    public UUID getSettlementId() {
-        return settlementId;
-    }
-
-    public long getLocalLiquidity() {
-        return localLiquidity;
-    }
-
-    public long getTreasuryBalance() {
-        return treasuryBalance;
-    }
-
-    public int getCommercialTaxPercent() {
-        return commercialTaxPercent;
-    }
-
-    public long getImportValueToday() {
-        return history.isEmpty() ? 0L : history.get(history.size() - 1).importValue();
-    }
-
-    public long getExportValueToday() {
-        return history.isEmpty() ? 0L : history.get(history.size() - 1).exportValue();
-    }
-
-    public long getTaxRevenueToday() {
-        return history.isEmpty() ? 0L : history.get(history.size() - 1).taxRevenue();
-    }
-
-    public long getPublicSpendingToday() {
-        return history.isEmpty() ? 0L : history.get(history.size() - 1).publicSpending();
-    }
-
-    public long getTradeBalanceToday() {
-        return getExportValueToday() - getImportValueToday();
-    }
-
-    public long getBudgetBalanceToday() {
-        return getTaxRevenueToday() - getPublicSpendingToday();
-    }
-
-    public long getImportValueAverage(int days) {
-        return average(days, 0);
-    }
-
-    public long getExportValueAverage(int days) {
-        return average(days, 1);
-    }
-
-    public long getTaxRevenueAverage(int days) {
-        return average(days, 2);
-    }
-
-    public long getPublicSpendingAverage(int days) {
-        return average(days, 3);
-    }
+    public long getTotalMoney() { return localLiquidity + treasuryBalance; }
+    public UUID getSettlementId() { return settlementId; }
+    public long getLocalLiquidity() { return localLiquidity; }
+    public long getTreasuryBalance() { return treasuryBalance; }
+    public int getCommercialTaxPercent() { return commercialTaxPercent; }
+    public long getImportValueToday() { return history.isEmpty() ? 0L : history.get(history.size() - 1).importValue(); }
+    public long getExportValueToday() { return history.isEmpty() ? 0L : history.get(history.size() - 1).exportValue(); }
+    public long getTaxRevenueToday() { return history.isEmpty() ? 0L : history.get(history.size() - 1).taxRevenue(); }
+    public long getPublicSpendingToday() { return history.isEmpty() ? 0L : history.get(history.size() - 1).publicSpending(); }
+    public long getTradeBalanceToday() { return getExportValueToday() - getImportValueToday(); }
+    public long getBudgetBalanceToday() { return getTaxRevenueToday() - getPublicSpendingToday(); }
+    public long getImportValueAverage(int days) { return average(days, 0); }
+    public long getExportValueAverage(int days) { return average(days, 1); }
+    public long getTaxRevenueAverage(int days) { return average(days, 2); }
+    public long getPublicSpendingAverage(int days) { return average(days, 3); }
 
     private long average(int days, int metric) {
-        if (days <= 0 || history.isEmpty()) {
-            return 0L;
-        }
-
+        if (days <= 0 || history.isEmpty()) return 0L;
         int count = Math.min(days, history.size());
         long total = 0L;
         for (int i = history.size() - count; i < history.size(); i++) {
@@ -346,23 +247,11 @@ public final class SettlementFinance {
         return (total + count / 2L) / count;
     }
 
-    public List<FiscalPoint> getHistory() {
-        return Collections.unmodifiableList(history);
-    }
+    public List<FiscalPoint> getHistory() { return Collections.unmodifiableList(history); }
+    private static int clampTaxRate(int value) { return Math.max(0, Math.min(100, value)); }
 
-    private static int clampTaxRate(int value) {
-        return Math.max(0, Math.min(100, value));
-    }
-
-    public record FiscalPoint(
-            long day,
-            long localLiquidity,
-            long treasuryBalance,
-            long importValue,
-            long exportValue,
-            long taxRevenue,
-            long publicSpending
-    ) {
+    public record FiscalPoint(long day, long localLiquidity, long treasuryBalance, long importValue,
+                              long exportValue, long taxRevenue, long publicSpending) {
         private static final String TAG_DAY = "Day";
         private static final String TAG_LOCAL_LIQUIDITY = "LocalLiquidity";
         private static final String TAG_TREASURY = "Treasury";
@@ -376,15 +265,10 @@ public final class SettlementFinance {
         }
 
         static FiscalPoint load(CompoundTag tag) {
-            return new FiscalPoint(
-                    tag.getLong(TAG_DAY),
-                    Math.max(0L, tag.getLong(TAG_LOCAL_LIQUIDITY)),
-                    Math.max(0L, tag.getLong(TAG_TREASURY)),
-                    Math.max(0L, tag.getLong(TAG_IMPORT_VALUE)),
-                    Math.max(0L, tag.getLong(TAG_EXPORT_VALUE)),
-                    Math.max(0L, tag.getLong(TAG_TAX_REVENUE)),
-                    Math.max(0L, tag.getLong(TAG_PUBLIC_SPENDING))
-            );
+            return new FiscalPoint(tag.getLong(TAG_DAY), Math.max(0L, tag.getLong(TAG_LOCAL_LIQUIDITY)),
+                    Math.max(0L, tag.getLong(TAG_TREASURY)), Math.max(0L, tag.getLong(TAG_IMPORT_VALUE)),
+                    Math.max(0L, tag.getLong(TAG_EXPORT_VALUE)), Math.max(0L, tag.getLong(TAG_TAX_REVENUE)),
+                    Math.max(0L, tag.getLong(TAG_PUBLIC_SPENDING)));
         }
 
         CompoundTag save() {

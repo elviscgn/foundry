@@ -61,6 +61,20 @@ repositories {
     maven { url = 'https://maven.createmod.net' }
     maven { url = 'https://maven.ithundxr.dev/mirror' }
     maven { url = 'https://raw.githubusercontent.com/Fuzss/modresources/main/maven/' }
+    maven { url = 'https://www.cursemaven.com' }
+
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        forRepositories(fg.repository)
+        filter {
+            includeGroup 'maven.modrinth'
+        }
+    }
 }
 
 dependencies {
@@ -75,6 +89,14 @@ dependencies {
     implementation fg.deobf("com.tterrag.registrate:Registrate:${registrate_version}")
     compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixin_extras_version}"))
     implementation "io.github.llamalad7:mixinextras-forge:${mixin_extras_version}"
+
+    // Physical resource geography.
+    implementation fg.deobf("maven.modrinth:geolosys:${geolosys_version}")
+
+    // Blueprint/urban-construction engine available in the dev runtime for Foundry development plots.
+    runtimeOnly fg.deobf("curse.maven:structurize-298744:8610456")
+    runtimeOnly fg.deobf("curse.maven:blockui-522992:6646544")
+    runtimeOnly fg.deobf("curse.maven:domum-ornamentum-527361:7585567")
 }
 
 tasks.named('processResources', ProcessResources).configure {
@@ -84,6 +106,7 @@ tasks.named('processResources', ProcessResources).configure {
             loader_version_range: loader_version_range,
             mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
             mod_authors: mod_authors, mod_description: mod_description,
+            geolosys_version_range: geolosys_version_range,
     ]
     inputs.properties replaceProperties
 

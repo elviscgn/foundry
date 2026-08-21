@@ -1,6 +1,7 @@
 package dev.foundry.network;
 
 import dev.foundry.Foundry;
+import dev.foundry.network.packet.NationalStatisticsPacket;
 import dev.foundry.network.packet.SettlementSnapshotPacket;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
@@ -11,34 +12,31 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class FoundryNetwork {
-    private static final String PROTOCOL_VERSION = "3";
+    private static final String PROTOCOL_VERSION = "4";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(Foundry.MOD_ID, "main"),
             () -> PROTOCOL_VERSION,
             PROTOCOL_VERSION::equals,
             PROTOCOL_VERSION::equals
     );
-
     private static int nextPacketId = 0;
 
-    private FoundryNetwork() {
-    }
+    private FoundryNetwork() { }
 
     public static void register() {
-        CHANNEL.registerMessage(
-                nextPacketId++,
-                SettlementSnapshotPacket.class,
-                SettlementSnapshotPacket::encode,
-                SettlementSnapshotPacket::decode,
-                SettlementSnapshotPacket::handle
-        );
+        CHANNEL.registerMessage(nextPacketId++, SettlementSnapshotPacket.class,
+                SettlementSnapshotPacket::encode, SettlementSnapshotPacket::decode, SettlementSnapshotPacket::handle);
+        CHANNEL.registerMessage(nextPacketId++, NationalStatisticsPacket.class,
+                NationalStatisticsPacket::encode, NationalStatisticsPacket::decode, NationalStatisticsPacket::handle);
     }
 
     public static void sendSettlementSnapshot(ServerPlayer player, Settlement settlement) {
         SettlementSavedData data = SettlementSavedData.get(player.serverLevel());
-        CHANNEL.send(
-                PacketDistributor.PLAYER.with(() -> player),
-                SettlementSnapshotPacket.from(settlement, data)
-        );
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), SettlementSnapshotPacket.from(settlement, data));
+    }
+
+    public static void sendNationalStatistics(ServerPlayer player) {
+        SettlementSavedData data = SettlementSavedData.get(player.serverLevel());
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), NationalStatisticsPacket.from(data));
     }
 }

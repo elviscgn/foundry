@@ -31,5 +31,8 @@ public final class Foundry {
             event.accept(ModItems.BAKERY.get());
             event.accept(ModItems.BRICKWORKS.get());
         }
+        if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
+            event.accept(ModItems.SURVEYORS_ROD.get());
+        }
     }
 }

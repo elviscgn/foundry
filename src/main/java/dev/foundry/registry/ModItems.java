@@ -1,6 +1,7 @@
 package dev.foundry.registry;
 
 import dev.foundry.Foundry;
+import dev.foundry.item.SurveyorsRodItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -30,6 +31,11 @@ public final class ModItems {
     public static final RegistryObject<Item> BRICKWORKS = ITEMS.register(
             "brickworks",
             () -> new BlockItem(ModBlocks.BRICKWORKS.get(), new Item.Properties())
+    );
+
+    public static final RegistryObject<Item> SURVEYORS_ROD = ITEMS.register(
+            "surveyors_rod",
+            () -> new SurveyorsRodItem(new Item.Properties())
     );
 
     private ModItems() {

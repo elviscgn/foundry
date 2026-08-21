@@ -93,7 +93,7 @@ public final class FreightDepotBlock extends BaseEntityBlock {
 
         if (settlement == null) {
             player.displayClientMessage(
-                    Component.literal("Freight Depot | No Town Hall within 128 blocks")
+                    Component.literal("Freight Depot | Must be inside settlement territory")
                             .withStyle(ChatFormatting.RED),
                     false
             );
@@ -134,24 +134,48 @@ public final class FreightDepotBlock extends BaseEntityBlock {
         int accepted = 0;
         String commodity = null;
         IndustryType industryType = null;
+        int offered = heldStack.getCount();
+        UUID originSettlementId = FreightDepotBlockEntity.getDomesticTradeOrigin(heldStack);
+        int unitPrice = FreightDepotBlockEntity.getDomesticTradeUnitPrice(heldStack);
 
         if (depot == null || depot.isIntakeMode()) {
             if (heldStack.is(Items.BREAD)) {
-                accepted = settlement.deliverBread(heldStack.getCount());
                 commodity = "bread";
                 industryType = IndustryType.BAKERY;
             } else if (heldStack.is(Items.BRICK)) {
-                accepted = settlement.deliverBuildingMaterials(heldStack.getCount());
                 commodity = "bricks";
                 industryType = IndustryType.BRICKWORKS;
+            }
+
+            if (industryType != null && originSettlementId != null
+                    && !originSettlementId.equals(settlement.getId())) {
+                offered = savedData.getAffordableDomesticImportAmount(
+                        originSettlementId,
+                        settlement,
+                        industryType,
+                        unitPrice,
+                        offered
+                );
+            }
+
+            if (industryType == IndustryType.BAKERY) {
+                accepted = settlement.deliverBread(offered);
+            } else if (industryType == IndustryType.BRICKWORKS) {
+                accepted = settlement.deliverBuildingMaterials(offered);
             }
         }
 
         if (accepted > 0 && commodity != null) {
-            UUID originSettlementId = FreightDepotBlockEntity.getDomesticTradeOrigin(heldStack);
             if (originSettlementId != null) {
                 long currentDay = Math.floorDiv(serverLevel.getDayTime(), TICKS_PER_DAY);
-                savedData.recordDomesticImport(originSettlementId, settlement, industryType, accepted, currentDay);
+                savedData.recordDomesticImport(
+                        originSettlementId,
+                        settlement,
+                        industryType,
+                        accepted,
+                        unitPrice,
+                        currentDay
+                );
             }
 
             if (!player.getAbilities().instabuild) {

@@ -20,6 +20,7 @@ import java.util.UUID;
 public final class SettlementSavedData extends SavedData {
     private static final String DATA_NAME = "foundry_settlements";
     private static final String TAG_SETTLEMENTS = "Settlements";
+    private static final String TAG_FINANCES = "Finances";
     private static final String TAG_DEPOTS = "Depots";
     private static final String TAG_INDUSTRIES = "Industries";
     private static final String TAG_LAST_PROCESSED_DAY = "LastProcessedDay";
@@ -27,6 +28,7 @@ public final class SettlementSavedData extends SavedData {
     private static final long TICKS_PER_DAY = 24_000L;
 
     private final Map<UUID, Settlement> settlementsById = new HashMap<>();
+    private final Map<UUID, SettlementFinance> financesBySettlementId = new HashMap<>();
     private final Map<String, UUID> settlementIdsByLocation = new HashMap<>();
     private final Map<String, DepotLink> depotLinksByLocation = new HashMap<>();
     private final Map<String, IndustrySite> industrySitesByLocation = new HashMap<>();
@@ -52,6 +54,14 @@ public final class SettlementSavedData extends SavedData {
             data.settlementIdsByLocation.put(settlement.locationKey(), settlement.getId());
         }
 
+        ListTag finances = tag.getList(TAG_FINANCES, Tag.TAG_COMPOUND);
+        for (int i = 0; i < finances.size(); i++) {
+            SettlementFinance finance = SettlementFinance.load(finances.getCompound(i));
+            if (data.settlementsById.containsKey(finance.getSettlementId())) {
+                data.financesBySettlementId.put(finance.getSettlementId(), finance);
+            }
+        }
+
         ListTag depots = tag.getList(TAG_DEPOTS, Tag.TAG_COMPOUND);
         for (int i = 0; i < depots.size(); i++) {
             DepotLink depotLink = DepotLink.load(depots.getCompound(i));
@@ -73,6 +83,22 @@ public final class SettlementSavedData extends SavedData {
             data.lastProcessedDay = tag.getLong(TAG_LAST_PROCESSED_DAY);
         }
 
+        boolean migratedFinance = false;
+        for (Settlement settlement : data.settlementsById.values()) {
+            SettlementFinance finance = data.financesBySettlementId.get(settlement.getId());
+            if (finance == null) {
+                finance = SettlementFinance.create(settlement);
+                data.financesBySettlementId.put(settlement.getId(), finance);
+                migratedFinance = true;
+            }
+            if (data.lastProcessedDay >= 0L) {
+                finance.ensureDay(data.lastProcessedDay);
+            }
+        }
+        if (migratedFinance) {
+            data.setDirty();
+        }
+
         return data;
     }
 
@@ -82,6 +108,7 @@ public final class SettlementSavedData extends SavedData {
         if (existingId != null) {
             Settlement existing = settlementsById.get(existingId);
             if (existing != null) {
+                ensureFinance(existing);
                 return existing;
             }
         }
@@ -94,12 +121,64 @@ public final class SettlementSavedData extends SavedData {
         }
         settlementsById.put(settlement.getId(), settlement);
         settlementIdsByLocation.put(locationKey, settlement.getId());
+        SettlementFinance finance = SettlementFinance.create(settlement);
+        if (lastProcessedDay >= 0L) {
+            finance.ensureDay(lastProcessedDay);
+        }
+        financesBySettlementId.put(settlement.getId(), finance);
         setDirty();
         return settlement;
     }
 
     public Settlement getSettlement(UUID settlementId) {
         return settlementId == null ? null : settlementsById.get(settlementId);
+    }
+
+    public SettlementFinance getFinance(Settlement settlement) {
+        return settlement == null ? null : ensureFinance(settlement);
+    }
+
+    public SettlementFinance getFinance(UUID settlementId) {
+        Settlement settlement = getSettlement(settlementId);
+        return settlement == null ? null : ensureFinance(settlement);
+    }
+
+    private SettlementFinance ensureFinance(Settlement settlement) {
+        SettlementFinance finance = financesBySettlementId.get(settlement.getId());
+        if (finance != null) {
+            return finance;
+        }
+        finance = SettlementFinance.create(settlement);
+        if (lastProcessedDay >= 0L) {
+            finance.ensureDay(lastProcessedDay);
+        }
+        financesBySettlementId.put(settlement.getId(), finance);
+        setDirty();
+        return finance;
+    }
+
+    public int getCommodityUnitPrice(Settlement settlement, IndustryType type) {
+        return SettlementFinance.quoteUnitPrice(settlement, type);
+    }
+
+    public int getAffordableDomesticImportAmount(UUID originSettlementId, Settlement destination,
+                                                  IndustryType type, int unitPrice, int requestedAmount) {
+        if (originSettlementId == null || destination == null || type == null || requestedAmount <= 0) {
+            return 0;
+        }
+        if (originSettlementId.equals(destination.getId())) {
+            return requestedAmount;
+        }
+
+        Settlement origin = settlementsById.get(originSettlementId);
+        if (origin == null) {
+            return 0;
+        }
+
+        int effectiveUnitPrice = unitPrice > 0 ? unitPrice : getCommodityUnitPrice(origin, type);
+        SettlementFinance destinationFinance = ensureFinance(destination);
+        long affordable = destinationFinance.getLocalLiquidity() / Math.max(1, effectiveUnitPrice);
+        return (int) Math.min((long) requestedAmount, affordable);
     }
 
     public SettlementTier getSettlementTier(Settlement settlement) {
@@ -118,6 +197,7 @@ public final class SettlementSavedData extends SavedData {
         }
 
         boolean changed = settlementsById.remove(settlementId) != null;
+        changed |= financesBySettlementId.remove(settlementId) != null;
         Iterator<DepotLink> depotIterator = depotLinksByLocation.values().iterator();
         while (depotIterator.hasNext()) {
             if (depotIterator.next().settlementId().equals(settlementId)) {
@@ -370,7 +450,7 @@ public final class SettlementSavedData extends SavedData {
     }
 
     public boolean recordDomesticImport(UUID originSettlementId, Settlement destination,
-                                        IndustryType type, int amount, long day) {
+                                        IndustryType type, int amount, int unitPrice, long day) {
         if (originSettlementId == null || destination == null || type == null || amount <= 0) {
             return false;
         }
@@ -378,7 +458,38 @@ public final class SettlementSavedData extends SavedData {
             return false;
         }
 
+        Settlement origin = settlementsById.get(originSettlementId);
+        if (origin == null) {
+            return false;
+        }
+
+        int effectiveUnitPrice = unitPrice > 0 ? unitPrice : getCommodityUnitPrice(origin, type);
+        long grossValue = (long) effectiveUnitPrice * amount;
+        SettlementFinance originFinance = ensureFinance(origin);
+        SettlementFinance destinationFinance = ensureFinance(destination);
+        if (!destinationFinance.canDebitLocal(grossValue)) {
+            return false;
+        }
+
+        long moneyBefore = originFinance.getTotalMoney() + destinationFinance.getTotalMoney();
+        if (!destinationFinance.debitLocal(grossValue)) {
+            return false;
+        }
+        originFinance.creditLocal(grossValue);
+
+        long tax = originFinance.calculateCommercialTax(grossValue);
+        if (tax > 0L && !originFinance.moveLocalToTreasury(tax)) {
+            throw new IllegalStateException("Kora commercial tax transfer failed after a settled domestic sale");
+        }
+
+        long moneyAfter = originFinance.getTotalMoney() + destinationFinance.getTotalMoney();
+        if (moneyBefore != moneyAfter) {
+            throw new IllegalStateException("Kora conservation invariant violated during domestic trade");
+        }
+
         destination.recordTradeImport(day, type, amount);
+        destinationFinance.recordImport(day, grossValue);
+        originFinance.recordExport(day, grossValue, tax);
         setDirty();
         return true;
     }
@@ -463,6 +574,7 @@ public final class SettlementSavedData extends SavedData {
                 settlement.recordHistory(currentDay);
                 settlement.ensureProductionDay(currentDay);
                 settlement.ensureTradeDay(currentDay);
+                ensureFinance(settlement).ensureDay(currentDay);
             }
             setDirty();
             return 0L;
@@ -474,6 +586,7 @@ public final class SettlementSavedData extends SavedData {
                 settlement.resetHistory(currentDay);
                 settlement.resetProductionHistory(currentDay);
                 settlement.resetTradeHistory(currentDay);
+                ensureFinance(settlement).resetHistory(currentDay);
             }
             setDirty();
             return 0L;
@@ -483,6 +596,7 @@ public final class SettlementSavedData extends SavedData {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.ensureProductionDay(currentDay);
                 settlement.ensureTradeDay(currentDay);
+                ensureFinance(settlement).ensureDay(currentDay);
             }
             return 0L;
         }
@@ -495,6 +609,7 @@ public final class SettlementSavedData extends SavedData {
                 settlement.advanceEconomyForDays(skippedDays);
                 settlement.ensureProductionDay(skippedToDay);
                 settlement.ensureTradeDay(skippedToDay);
+                ensureFinance(settlement).ensureDay(skippedToDay);
             }
         }
 
@@ -505,6 +620,7 @@ public final class SettlementSavedData extends SavedData {
                 settlement.recordHistory(day);
                 settlement.ensureProductionDay(day);
                 settlement.ensureTradeDay(day);
+                ensureFinance(settlement).ensureDay(day);
             }
         }
 
@@ -540,6 +656,12 @@ public final class SettlementSavedData extends SavedData {
             settlements.add(settlement.save());
         }
         tag.put(TAG_SETTLEMENTS, settlements);
+
+        ListTag finances = new ListTag();
+        for (SettlementFinance finance : financesBySettlementId.values()) {
+            finances.add(finance.save());
+        }
+        tag.put(TAG_FINANCES, finances);
 
         ListTag depots = new ListTag();
         for (DepotLink depotLink : depotLinksByLocation.values()) {

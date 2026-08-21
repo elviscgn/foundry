@@ -16,7 +16,6 @@ public final class Foundry {
 
     public Foundry(FMLJavaModLoadingContext context) {
         IEventBus modEventBus = context.getModEventBus();
-
         ModBlocks.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlockEntities.register(modEventBus);
@@ -30,6 +29,8 @@ public final class Foundry {
             event.accept(ModItems.FREIGHT_DEPOT.get());
             event.accept(ModItems.BAKERY.get());
             event.accept(ModItems.BRICKWORKS.get());
+            event.accept(ModItems.WAREHOUSE.get());
+            event.accept(ModItems.NATIONAL_STATISTICS_BUREAU.get());
         }
         if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(ModItems.SURVEYORS_ROD.get());

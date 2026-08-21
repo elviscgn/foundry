@@ -13,6 +13,13 @@ import java.util.function.Supplier;
 
 public record SettlementSnapshotPacket(
         int population,
+        int workforce,
+        int employed,
+        int unemployed,
+        int foodJobs,
+        int foodEmployed,
+        int constructionJobs,
+        int constructionEmployed,
         int breadSupplied,
         int breadTarget,
         int dailyBreadConsumption,
@@ -39,6 +46,13 @@ public record SettlementSnapshotPacket(
 
         return new SettlementSnapshotPacket(
                 settlement.getPopulation(),
+                settlement.getWorkforce(),
+                settlement.getEmployed(),
+                settlement.getUnemployed(),
+                settlement.getFoodJobCapacity(),
+                settlement.getFoodEmployed(),
+                settlement.getConstructionJobCapacity(),
+                settlement.getConstructionEmployed(),
                 settlement.getBreadSupplied(),
                 settlement.getBreadTarget(),
                 settlement.getDailyBreadConsumption(),
@@ -54,6 +68,13 @@ public record SettlementSnapshotPacket(
 
     public static void encode(SettlementSnapshotPacket packet, FriendlyByteBuf buffer) {
         buffer.writeVarInt(packet.population);
+        buffer.writeVarInt(packet.workforce);
+        buffer.writeVarInt(packet.employed);
+        buffer.writeVarInt(packet.unemployed);
+        buffer.writeVarInt(packet.foodJobs);
+        buffer.writeVarInt(packet.foodEmployed);
+        buffer.writeVarInt(packet.constructionJobs);
+        buffer.writeVarInt(packet.constructionEmployed);
         buffer.writeVarInt(packet.breadSupplied);
         buffer.writeVarInt(packet.breadTarget);
         buffer.writeVarInt(packet.dailyBreadConsumption);
@@ -78,6 +99,13 @@ public record SettlementSnapshotPacket(
 
     public static SettlementSnapshotPacket decode(FriendlyByteBuf buffer) {
         int population = buffer.readVarInt();
+        int workforce = buffer.readVarInt();
+        int employed = buffer.readVarInt();
+        int unemployed = buffer.readVarInt();
+        int foodJobs = buffer.readVarInt();
+        int foodEmployed = buffer.readVarInt();
+        int constructionJobs = buffer.readVarInt();
+        int constructionEmployed = buffer.readVarInt();
         int breadSupplied = buffer.readVarInt();
         int breadTarget = buffer.readVarInt();
         int dailyBreadConsumption = buffer.readVarInt();
@@ -104,6 +132,13 @@ public record SettlementSnapshotPacket(
 
         return new SettlementSnapshotPacket(
                 population,
+                workforce,
+                employed,
+                unemployed,
+                foodJobs,
+                foodEmployed,
+                constructionJobs,
+                constructionEmployed,
                 breadSupplied,
                 breadTarget,
                 dailyBreadConsumption,

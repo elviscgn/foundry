@@ -6,7 +6,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.List;
@@ -123,25 +122,48 @@ public final class SettlementScreen extends Screen {
         String bread = "Bread  " + snapshot.breadSupplied() + "/" + snapshot.breadTarget()
                 + "   -" + snapshot.dailyBreadConsumption() + "/day";
         String bricks = "Bricks  " + snapshot.buildingMaterialsSupplied() + "/" + snapshot.buildingMaterialsTarget();
+        String workforce = "Workforce  " + snapshot.employed() + "/" + snapshot.workforce() + " employed";
+        String unemployed = "Unemployed  " + snapshot.unemployed();
+        String sectors = "Food " + snapshot.foodEmployed() + "/" + snapshot.foodJobs()
+                + "   Construction " + snapshot.constructionEmployed() + "/" + snapshot.constructionJobs();
 
+        int row = 0;
         guiGraphics.drawString(font, Component.literal(population), x, y, TEXT);
         int prosperityX = x + width - font.width(prosperity);
-        if (prosperityX > x + font.width(population) + 8) {
+        if (!compact && prosperityX > x + font.width(population) + 8) {
             guiGraphics.drawString(font, Component.literal(prosperity), prosperityX, y, TEXT);
+        } else {
+            row += 14;
+            guiGraphics.drawString(font, Component.literal(prosperity), x, y + row, TEXT);
         }
 
+        row += 14;
         int breadColor = snapshot.breadSupplied() >= snapshot.breadTarget() ? GREEN : TEXT;
         int brickColor = snapshot.buildingMaterialsSupplied() >= snapshot.buildingMaterialsTarget() ? GREEN : TEXT;
-        guiGraphics.drawString(font, Component.literal(bread), x, y + 14, breadColor);
+        guiGraphics.drawString(font, Component.literal(bread), x, y + row, breadColor);
 
         int bricksX = x + width - font.width(bricks);
-        if (bricksX > x + font.width(bread) + 8) {
-            guiGraphics.drawString(font, Component.literal(bricks), bricksX, y + 14, brickColor);
-            return 28;
+        if (!compact && bricksX > x + font.width(bread) + 8) {
+            guiGraphics.drawString(font, Component.literal(bricks), bricksX, y + row, brickColor);
+        } else {
+            row += 14;
+            guiGraphics.drawString(font, Component.literal(bricks), x, y + row, brickColor);
         }
 
-        guiGraphics.drawString(font, Component.literal(bricks), x, y + 28, brickColor);
-        return 42;
+        row += 14;
+        guiGraphics.drawString(font, Component.literal(workforce), x, y + row, TEXT);
+        int unemployedX = x + width - font.width(unemployed);
+        if (!compact && unemployedX > x + font.width(workforce) + 8) {
+            guiGraphics.drawString(font, Component.literal(unemployed), unemployedX, y + row, MUTED_TEXT);
+        } else {
+            row += 14;
+            guiGraphics.drawString(font, Component.literal(unemployed), x, y + row, MUTED_TEXT);
+        }
+
+        row += 14;
+        guiGraphics.drawString(font, Component.literal(sectors), x, y + row,
+                snapshot.employed() > 0 ? STEEL : MUTED_TEXT);
+        return row + 14;
     }
 
     private void drawBreadHeader(GuiGraphics guiGraphics, int x, int y, int width) {

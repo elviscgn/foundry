@@ -1,4 +1,6 @@
 {
   "block.foundry.town_hall": "Town Hall",
-  "block.foundry.freight_depot": "Freight Depot"
+  "block.foundry.freight_depot": "Freight Depot",
+  "block.foundry.bakery": "Bakery",
+  "block.foundry.brickworks": "Brickworks"
 }

@@ -18,13 +18,16 @@ public final class SettlementSavedData extends SavedData {
     private static final String DATA_NAME = "foundry_settlements";
     private static final String TAG_SETTLEMENTS = "Settlements";
     private static final String TAG_DEPOTS = "Depots";
+    private static final String TAG_INDUSTRIES = "Industries";
     private static final String TAG_LAST_PROCESSED_DAY = "LastProcessedDay";
     private static final int DEFAULT_DEPOT_LINK_RANGE = 128;
+    private static final int DEFAULT_INDUSTRY_LINK_RANGE = 128;
     private static final long TICKS_PER_DAY = 24_000L;
 
     private final Map<UUID, Settlement> settlementsById = new HashMap<>();
     private final Map<String, UUID> settlementIdsByLocation = new HashMap<>();
     private final Map<String, DepotLink> depotLinksByLocation = new HashMap<>();
+    private final Map<String, IndustrySite> industrySitesByLocation = new HashMap<>();
     private long lastProcessedDay = -1L;
 
     public static SettlementSavedData get(ServerLevel level) {
@@ -53,6 +56,15 @@ public final class SettlementSavedData extends SavedData {
                 data.depotLinksByLocation.put(depotLink.locationKey(), depotLink);
             }
         }
+
+        ListTag industries = tag.getList(TAG_INDUSTRIES, Tag.TAG_COMPOUND);
+        for (int i = 0; i < industries.size(); i++) {
+            IndustrySite industrySite = IndustrySite.load(industries.getCompound(i));
+            if (industrySite != null && data.settlementsById.containsKey(industrySite.settlementId())) {
+                data.industrySitesByLocation.put(industrySite.locationKey(), industrySite);
+            }
+        }
+        data.recalculateAllIndustryJobs();
 
         if (tag.contains(TAG_LAST_PROCESSED_DAY, Tag.TAG_LONG)) {
             data.lastProcessedDay = tag.getLong(TAG_LAST_PROCESSED_DAY);
@@ -93,6 +105,14 @@ public final class SettlementSavedData extends SavedData {
         while (depotIterator.hasNext()) {
             if (depotIterator.next().settlementId().equals(settlementId)) {
                 depotIterator.remove();
+                changed = true;
+            }
+        }
+
+        Iterator<IndustrySite> industryIterator = industrySitesByLocation.values().iterator();
+        while (industryIterator.hasNext()) {
+            if (industryIterator.next().settlementId().equals(settlementId)) {
+                industryIterator.remove();
                 changed = true;
             }
         }
@@ -143,6 +163,96 @@ public final class SettlementSavedData extends SavedData {
         if (depotLinksByLocation.remove(locationKey) != null) {
             setDirty();
         }
+    }
+
+    public Settlement registerIndustry(ResourceKey<Level> dimension, BlockPos industryPos, IndustryType type) {
+        String locationKey = Settlement.locationKey(dimension, industryPos);
+        IndustrySite existingSite = industrySitesByLocation.get(locationKey);
+        if (existingSite != null && existingSite.type() == type) {
+            Settlement existingSettlement = settlementsById.get(existingSite.settlementId());
+            if (existingSettlement != null) {
+                return existingSettlement;
+            }
+        }
+
+        UUID oldSettlementId = existingSite == null ? null : existingSite.settlementId();
+        Settlement nearest = findNearestSettlement(dimension, industryPos, DEFAULT_INDUSTRY_LINK_RANGE);
+        if (nearest == null) {
+            if (existingSite != null) {
+                industrySitesByLocation.remove(locationKey);
+                recalculateIndustryJobs(oldSettlementId);
+                setDirty();
+            }
+            return null;
+        }
+
+        IndustrySite industrySite = new IndustrySite(
+                dimension.location().toString(),
+                industryPos.asLong(),
+                nearest.getId(),
+                type
+        );
+        industrySitesByLocation.put(locationKey, industrySite);
+        if (oldSettlementId != null && !oldSettlementId.equals(nearest.getId())) {
+            recalculateIndustryJobs(oldSettlementId);
+        }
+        recalculateIndustryJobs(nearest.getId());
+        setDirty();
+        return nearest;
+    }
+
+    public Settlement getSettlementForIndustry(ResourceKey<Level> dimension, BlockPos industryPos) {
+        String locationKey = Settlement.locationKey(dimension, industryPos);
+        IndustrySite industrySite = industrySitesByLocation.get(locationKey);
+        if (industrySite == null) {
+            return null;
+        }
+
+        Settlement settlement = settlementsById.get(industrySite.settlementId());
+        if (settlement == null) {
+            industrySitesByLocation.remove(locationKey);
+            setDirty();
+        }
+        return settlement;
+    }
+
+    public void removeIndustry(ResourceKey<Level> dimension, BlockPos industryPos) {
+        String locationKey = Settlement.locationKey(dimension, industryPos);
+        IndustrySite removed = industrySitesByLocation.remove(locationKey);
+        if (removed != null) {
+            recalculateIndustryJobs(removed.settlementId());
+            setDirty();
+        }
+    }
+
+    private void recalculateAllIndustryJobs() {
+        for (UUID settlementId : settlementsById.keySet()) {
+            recalculateIndustryJobs(settlementId);
+        }
+    }
+
+    private void recalculateIndustryJobs(UUID settlementId) {
+        if (settlementId == null) {
+            return;
+        }
+        Settlement settlement = settlementsById.get(settlementId);
+        if (settlement == null) {
+            return;
+        }
+
+        int foodJobs = 0;
+        int constructionJobs = 0;
+        for (IndustrySite site : industrySitesByLocation.values()) {
+            if (!site.settlementId().equals(settlementId)) {
+                continue;
+            }
+            if (site.type() == IndustryType.BAKERY) {
+                foodJobs += site.type().jobs();
+            } else if (site.type() == IndustryType.BRICKWORKS) {
+                constructionJobs += site.type().jobs();
+            }
+        }
+        settlement.setIndustryJobCapacity(foodJobs, constructionJobs);
     }
 
     public long advanceEconomy(long dayTime) {
@@ -222,6 +332,13 @@ public final class SettlementSavedData extends SavedData {
             depots.add(depotLink.save());
         }
         tag.put(TAG_DEPOTS, depots);
+
+        ListTag industries = new ListTag();
+        for (IndustrySite industrySite : industrySitesByLocation.values()) {
+            industries.add(industrySite.save());
+        }
+        tag.put(TAG_INDUSTRIES, industries);
+
         tag.putLong(TAG_LAST_PROCESSED_DAY, lastProcessedDay);
         return tag;
     }
@@ -244,6 +361,39 @@ public final class SettlementSavedData extends SavedData {
             tag.putString(TAG_DIMENSION, dimension);
             tag.putLong(TAG_POS, pos);
             tag.putUUID(TAG_SETTLEMENT_ID, settlementId);
+            return tag;
+        }
+
+        String locationKey() {
+            return Settlement.locationKey(dimension, pos);
+        }
+    }
+
+    private record IndustrySite(String dimension, long pos, UUID settlementId, IndustryType type) {
+        private static final String TAG_DIMENSION = "Dimension";
+        private static final String TAG_POS = "Pos";
+        private static final String TAG_SETTLEMENT_ID = "SettlementId";
+        private static final String TAG_TYPE = "Type";
+
+        static IndustrySite load(CompoundTag tag) {
+            IndustryType type = IndustryType.fromSerializedName(tag.getString(TAG_TYPE));
+            if (type == null) {
+                return null;
+            }
+            return new IndustrySite(
+                    tag.getString(TAG_DIMENSION),
+                    tag.getLong(TAG_POS),
+                    tag.getUUID(TAG_SETTLEMENT_ID),
+                    type
+            );
+        }
+
+        CompoundTag save() {
+            CompoundTag tag = new CompoundTag();
+            tag.putString(TAG_DIMENSION, dimension);
+            tag.putLong(TAG_POS, pos);
+            tag.putUUID(TAG_SETTLEMENT_ID, settlementId);
+            tag.putString(TAG_TYPE, type.serializedName());
             return tag;
         }
 

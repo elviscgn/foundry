@@ -22,6 +22,16 @@ public final class ModItems {
             () -> new BlockItem(ModBlocks.FREIGHT_DEPOT.get(), new Item.Properties())
     );
 
+    public static final RegistryObject<Item> BAKERY = ITEMS.register(
+            "bakery",
+            () -> new BlockItem(ModBlocks.BAKERY.get(), new Item.Properties())
+    );
+
+    public static final RegistryObject<Item> BRICKWORKS = ITEMS.register(
+            "brickworks",
+            () -> new BlockItem(ModBlocks.BRICKWORKS.get(), new Item.Properties())
+    );
+
     private ModItems() {
     }
 

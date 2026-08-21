@@ -20,6 +20,7 @@ public record SettlementSnapshotPacket(
         int foodEmployed,
         int constructionJobs,
         int constructionEmployed,
+        String laborPriority,
         int breadSupplied,
         int breadTarget,
         int dailyBreadConsumption,
@@ -53,6 +54,7 @@ public record SettlementSnapshotPacket(
                 settlement.getFoodEmployed(),
                 settlement.getConstructionJobCapacity(),
                 settlement.getConstructionEmployed(),
+                settlement.getLaborPriority().displayName(),
                 settlement.getBreadSupplied(),
                 settlement.getBreadTarget(),
                 settlement.getDailyBreadConsumption(),
@@ -75,6 +77,7 @@ public record SettlementSnapshotPacket(
         buffer.writeVarInt(packet.foodEmployed);
         buffer.writeVarInt(packet.constructionJobs);
         buffer.writeVarInt(packet.constructionEmployed);
+        buffer.writeUtf(packet.laborPriority, 32);
         buffer.writeVarInt(packet.breadSupplied);
         buffer.writeVarInt(packet.breadTarget);
         buffer.writeVarInt(packet.dailyBreadConsumption);
@@ -106,6 +109,7 @@ public record SettlementSnapshotPacket(
         int foodEmployed = buffer.readVarInt();
         int constructionJobs = buffer.readVarInt();
         int constructionEmployed = buffer.readVarInt();
+        String laborPriority = buffer.readUtf(32);
         int breadSupplied = buffer.readVarInt();
         int breadTarget = buffer.readVarInt();
         int dailyBreadConsumption = buffer.readVarInt();
@@ -139,6 +143,7 @@ public record SettlementSnapshotPacket(
                 foodEmployed,
                 constructionJobs,
                 constructionEmployed,
+                laborPriority,
                 breadSupplied,
                 breadTarget,
                 dailyBreadConsumption,

@@ -123,7 +123,11 @@ public final class SettlementScreen extends Screen {
                 + "   -" + snapshot.dailyBreadConsumption() + "/day";
         String bricks = "Bricks  " + snapshot.buildingMaterialsSupplied() + "/" + snapshot.buildingMaterialsTarget();
         String workforce = "Workforce  " + snapshot.employed() + "/" + snapshot.workforce() + " employed";
-        String unemployed = "Unemployed  " + snapshot.unemployed();
+        String policy = "Labor policy  " + snapshot.laborPriority();
+        int totalJobs = snapshot.foodJobs() + snapshot.constructionJobs();
+        int vacancies = Math.max(0, totalJobs - snapshot.employed());
+        String jobs = "Jobs  " + snapshot.employed() + "/" + totalJobs + " filled";
+        String vacant = "Vacant  " + vacancies;
         String sectors = "Food " + snapshot.foodEmployed() + "/" + snapshot.foodJobs()
                 + "   Construction " + snapshot.constructionEmployed() + "/" + snapshot.constructionJobs();
 
@@ -152,12 +156,24 @@ public final class SettlementScreen extends Screen {
 
         row += 14;
         guiGraphics.drawString(font, Component.literal(workforce), x, y + row, TEXT);
-        int unemployedX = x + width - font.width(unemployed);
-        if (!compact && unemployedX > x + font.width(workforce) + 8) {
-            guiGraphics.drawString(font, Component.literal(unemployed), unemployedX, y + row, MUTED_TEXT);
+        int policyX = x + width - font.width(policy);
+        if (!compact && policyX > x + font.width(workforce) + 8) {
+            guiGraphics.drawString(font, Component.literal(policy), policyX, y + row, GOLD);
         } else {
             row += 14;
-            guiGraphics.drawString(font, Component.literal(unemployed), x, y + row, MUTED_TEXT);
+            guiGraphics.drawString(font, Component.literal(policy), x, y + row, GOLD);
+        }
+
+        row += 14;
+        guiGraphics.drawString(font, Component.literal(jobs), x, y + row, TEXT);
+        int vacantX = x + width - font.width(vacant);
+        if (!compact && vacantX > x + font.width(jobs) + 8) {
+            guiGraphics.drawString(font, Component.literal(vacant), vacantX, y + row,
+                    vacancies > 0 ? GOLD : MUTED_TEXT);
+        } else {
+            row += 14;
+            guiGraphics.drawString(font, Component.literal(vacant), x, y + row,
+                    vacancies > 0 ? GOLD : MUTED_TEXT);
         }
 
         row += 14;

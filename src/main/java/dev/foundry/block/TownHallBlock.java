@@ -4,6 +4,7 @@ import dev.foundry.network.FoundryNetwork;
 import dev.foundry.settlement.Settlement;
 import dev.foundry.settlement.SettlementSavedData;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -41,8 +42,20 @@ public final class TownHallBlock extends Block {
             return InteractionResult.CONSUME;
         }
 
-        Settlement settlement = SettlementSavedData.get(serverLevel)
-                .getOrCreate(serverLevel.dimension(), pos);
+        SettlementSavedData data = SettlementSavedData.get(serverLevel);
+        Settlement settlement = data.getOrCreate(serverLevel.dimension(), pos);
+
+        if (serverPlayer.isShiftKeyDown()) {
+            settlement.cycleLaborPriority();
+            data.setDirty();
+            data.refreshIndustrySignals(serverLevel.getServer());
+            serverPlayer.displayClientMessage(
+                    Component.literal("Labor priority // " + settlement.getLaborPriority().displayName()),
+                    true
+            );
+            return InteractionResult.CONSUME;
+        }
+
         FoundryNetwork.sendSettlementSnapshot(serverPlayer, settlement);
         return InteractionResult.CONSUME;
     }

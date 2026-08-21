@@ -9,7 +9,6 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -32,6 +31,7 @@ public final class SettlementSavedData extends SavedData {
     private final Map<String, UUID> settlementIdsByLocation = new HashMap<>();
     private final Map<String, DepotLink> depotLinksByLocation = new HashMap<>();
     private final Map<String, IndustrySite> industrySitesByLocation = new HashMap<>();
+    private final Map<UUID, String> pendingIndustryLinksByPlayer = new HashMap<>();
     private long lastProcessedDay = -1L;
 
     public static SettlementSavedData get(ServerLevel level) {
@@ -90,6 +90,7 @@ public final class SettlementSavedData extends SavedData {
         Settlement settlement = Settlement.create(dimension, pos);
         if (lastProcessedDay >= 0L) {
             settlement.recordHistory(lastProcessedDay);
+            settlement.ensureProductionDay(lastProcessedDay);
         }
         settlementsById.put(settlement.getId(), settlement);
         settlementIdsByLocation.put(locationKey, settlement.getId());
@@ -164,7 +165,18 @@ public final class SettlementSavedData extends SavedData {
 
     public void removeDepot(ResourceKey<Level> dimension, BlockPos depotPos) {
         String locationKey = Settlement.locationKey(dimension, depotPos);
-        if (depotLinksByLocation.remove(locationKey) != null) {
+        boolean changed = depotLinksByLocation.remove(locationKey) != null;
+        String dimensionName = dimension.location().toString();
+
+        for (Map.Entry<String, IndustrySite> entry : industrySitesByLocation.entrySet()) {
+            IndustrySite site = entry.getValue();
+            if (site.isLinkedToDepot(dimensionName, depotPos.asLong())) {
+                entry.setValue(site.withoutDepotLink());
+                changed = true;
+            }
+        }
+
+        if (changed) {
             setDirty();
         }
     }
@@ -190,12 +202,9 @@ public final class SettlementSavedData extends SavedData {
             return null;
         }
 
-        IndustrySite industrySite = new IndustrySite(
-                dimension.location().toString(),
-                industryPos.asLong(),
-                nearest.getId(),
-                type
-        );
+        IndustrySite industrySite = existingSite != null && existingSite.type() == type
+                ? existingSite.withSettlement(nearest.getId())
+                : IndustrySite.create(dimension.location().toString(), industryPos.asLong(), nearest.getId(), type);
         industrySitesByLocation.put(locationKey, industrySite);
         if (oldSettlementId != null && !oldSettlementId.equals(nearest.getId())) {
             recalculateIndustryJobs(oldSettlementId);
@@ -218,6 +227,122 @@ public final class SettlementSavedData extends SavedData {
             setDirty();
         }
         return settlement;
+    }
+
+    public IndustryLinkResult beginIndustryDepotLink(UUID playerId, ResourceKey<Level> dimension,
+                                                      BlockPos industryPos, IndustryType type) {
+        Settlement settlement = registerIndustry(dimension, industryPos, type);
+        if (settlement == null) {
+            pendingIndustryLinksByPlayer.remove(playerId);
+            return new IndustryLinkResult(
+                    true,
+                    false,
+                    type.displayName() + " // LINK FAILED // No Town Hall within 128 blocks"
+            );
+        }
+
+        pendingIndustryLinksByPlayer.put(playerId, Settlement.locationKey(dimension, industryPos));
+        return new IndustryLinkResult(
+                true,
+                true,
+                type.displayName() + " // LINE SELECTED // Sneak-right-click a Freight Depot"
+        );
+    }
+
+    public IndustryLinkResult completeIndustryDepotLink(UUID playerId, ResourceKey<Level> dimension,
+                                                         BlockPos depotPos) {
+        String selectedKey = pendingIndustryLinksByPlayer.remove(playerId);
+        if (selectedKey == null) {
+            return IndustryLinkResult.notHandled();
+        }
+
+        IndustrySite selectedSite = industrySitesByLocation.get(selectedKey);
+        if (selectedSite == null) {
+            return new IndustryLinkResult(true, false, "Industry link expired; select the industry again");
+        }
+
+        Settlement depotSettlement = getSettlementForDepot(dimension, depotPos);
+        if (depotSettlement == null) {
+            depotSettlement = linkDepot(dimension, depotPos);
+        }
+        if (depotSettlement == null) {
+            return new IndustryLinkResult(true, false, "Freight Depot // LINK FAILED // No Town Hall within 128 blocks");
+        }
+
+        String depotDimension = dimension.location().toString();
+        if (!selectedSite.dimension().equals(depotDimension)
+                || !selectedSite.settlementId().equals(depotSettlement.getId())) {
+            return new IndustryLinkResult(
+                    true,
+                    false,
+                    selectedSite.type().displayName() + " // LINK FAILED // Depot belongs to another settlement"
+            );
+        }
+
+        long depotPosLong = depotPos.asLong();
+        for (Map.Entry<String, IndustrySite> entry : industrySitesByLocation.entrySet()) {
+            IndustrySite site = entry.getValue();
+            if (!entry.getKey().equals(selectedKey)
+                    && site.type() == selectedSite.type()
+                    && site.isLinkedToDepot(depotDimension, depotPosLong)) {
+                entry.setValue(site.withoutDepotLink());
+            }
+        }
+
+        selectedSite = selectedSite.withDepotLink(depotDimension, depotPosLong);
+        industrySitesByLocation.put(selectedKey, selectedSite);
+        setDirty();
+        return new IndustryLinkResult(
+                true,
+                true,
+                selectedSite.type().displayName() + " // PRODUCTION LINE LINKED // Freight Depot will meter automated output"
+        );
+    }
+
+    public IndustryTelemetry getIndustryTelemetry(ResourceKey<Level> dimension, BlockPos industryPos, long currentDay) {
+        IndustrySite site = industrySitesByLocation.get(Settlement.locationKey(dimension, industryPos));
+        if (site == null) {
+            return IndustryTelemetry.EMPTY;
+        }
+
+        Settlement settlement = settlementsById.get(site.settlementId());
+        int today = site.outputDay() == currentDay ? site.outputToday() : 0;
+        int average = 0;
+        if (settlement != null) {
+            average = site.type() == IndustryType.BAKERY
+                    ? settlement.getFoodOutputAverage(7)
+                    : settlement.getConstructionOutputAverage(7);
+        }
+        return new IndustryTelemetry(site.depotLinked(), today, site.lifetimeOutput(), average);
+    }
+
+    public boolean recordIndustryOutputForDepot(ResourceKey<Level> dimension, BlockPos depotPos,
+                                                 IndustryType type, int amount, long day) {
+        if (type == null || amount <= 0) {
+            return false;
+        }
+
+        Settlement settlement = getSettlementForDepot(dimension, depotPos);
+        if (settlement == null) {
+            return false;
+        }
+
+        String depotDimension = dimension.location().toString();
+        long depotPosLong = depotPos.asLong();
+        for (Map.Entry<String, IndustrySite> entry : industrySitesByLocation.entrySet()) {
+            IndustrySite site = entry.getValue();
+            if (!site.settlementId().equals(settlement.getId())
+                    || site.type() != type
+                    || !site.isLinkedToDepot(depotDimension, depotPosLong)) {
+                continue;
+            }
+
+            entry.setValue(site.recordOutput(day, amount));
+            settlement.recordIndustryOutput(day, type, amount);
+            setDirty();
+            return true;
+        }
+        return false;
     }
 
     public int getIndustryStaffingSignal(ResourceKey<Level> dimension, BlockPos industryPos) {
@@ -256,6 +381,7 @@ public final class SettlementSavedData extends SavedData {
         String locationKey = Settlement.locationKey(dimension, industryPos);
         IndustrySite removed = industrySitesByLocation.remove(locationKey);
         if (removed != null) {
+            pendingIndustryLinksByPlayer.values().removeIf(locationKey::equals);
             recalculateIndustryJobs(removed.settlementId());
             setDirty();
         }
@@ -297,6 +423,7 @@ public final class SettlementSavedData extends SavedData {
             lastProcessedDay = currentDay;
             for (Settlement settlement : settlementsById.values()) {
                 settlement.recordHistory(currentDay);
+                settlement.ensureProductionDay(currentDay);
             }
             setDirty();
             return 0L;
@@ -306,20 +433,26 @@ public final class SettlementSavedData extends SavedData {
             lastProcessedDay = currentDay;
             for (Settlement settlement : settlementsById.values()) {
                 settlement.resetHistory(currentDay);
+                settlement.resetProductionHistory(currentDay);
             }
             setDirty();
             return 0L;
         }
 
         if (currentDay == lastProcessedDay) {
+            for (Settlement settlement : settlementsById.values()) {
+                settlement.ensureProductionDay(currentDay);
+            }
             return 0L;
         }
 
         long daysElapsed = currentDay - lastProcessedDay;
         long skippedDays = Math.max(0L, daysElapsed - Settlement.HISTORY_LIMIT);
         if (skippedDays > 0L) {
+            long skippedToDay = lastProcessedDay + skippedDays;
             for (Settlement settlement : settlementsById.values()) {
                 settlement.advanceEconomyForDays(skippedDays);
+                settlement.ensureProductionDay(skippedToDay);
             }
         }
 
@@ -328,6 +461,7 @@ public final class SettlementSavedData extends SavedData {
             for (Settlement settlement : settlementsById.values()) {
                 settlement.advanceEconomyForDay();
                 settlement.recordHistory(day);
+                settlement.ensureProductionDay(day);
             }
         }
 
@@ -379,6 +513,16 @@ public final class SettlementSavedData extends SavedData {
         return tag;
     }
 
+    public record IndustryLinkResult(boolean handled, boolean success, String message) {
+        private static IndustryLinkResult notHandled() {
+            return new IndustryLinkResult(false, false, "");
+        }
+    }
+
+    public record IndustryTelemetry(boolean depotLinked, int outputToday, long lifetimeOutput, int sectorAverage7d) {
+        private static final IndustryTelemetry EMPTY = new IndustryTelemetry(false, 0, 0L, 0);
+    }
+
     private record DepotLink(String dimension, long pos, UUID settlementId) {
         private static final String TAG_DIMENSION = "Dimension";
         private static final String TAG_POS = "Pos";
@@ -405,22 +549,55 @@ public final class SettlementSavedData extends SavedData {
         }
     }
 
-    private record IndustrySite(String dimension, long pos, UUID settlementId, IndustryType type) {
+    private record IndustrySite(
+            String dimension,
+            long pos,
+            UUID settlementId,
+            IndustryType type,
+            boolean depotLinked,
+            String depotDimension,
+            long depotPos,
+            long outputDay,
+            int outputToday,
+            long lifetimeOutput
+    ) {
         private static final String TAG_DIMENSION = "Dimension";
         private static final String TAG_POS = "Pos";
         private static final String TAG_SETTLEMENT_ID = "SettlementId";
         private static final String TAG_TYPE = "Type";
+        private static final String TAG_DEPOT_LINKED = "DepotLinked";
+        private static final String TAG_DEPOT_DIMENSION = "DepotDimension";
+        private static final String TAG_DEPOT_POS = "DepotPos";
+        private static final String TAG_OUTPUT_DAY = "OutputDay";
+        private static final String TAG_OUTPUT_TODAY = "OutputToday";
+        private static final String TAG_LIFETIME_OUTPUT = "LifetimeOutput";
+
+        static IndustrySite create(String dimension, long pos, UUID settlementId, IndustryType type) {
+            return new IndustrySite(dimension, pos, settlementId, type, false, "", 0L, -1L, 0, 0L);
+        }
 
         static IndustrySite load(CompoundTag tag) {
             IndustryType type = IndustryType.fromSerializedName(tag.getString(TAG_TYPE));
             if (type == null) {
                 return null;
             }
+
+            boolean depotLinked = tag.getBoolean(TAG_DEPOT_LINKED);
+            long outputDay = tag.contains(TAG_OUTPUT_DAY, Tag.TAG_LONG) ? tag.getLong(TAG_OUTPUT_DAY) : -1L;
+            long lifetimeOutput = tag.contains(TAG_LIFETIME_OUTPUT, Tag.TAG_LONG)
+                    ? Math.max(0L, tag.getLong(TAG_LIFETIME_OUTPUT))
+                    : 0L;
             return new IndustrySite(
                     tag.getString(TAG_DIMENSION),
                     tag.getLong(TAG_POS),
                     tag.getUUID(TAG_SETTLEMENT_ID),
-                    type
+                    type,
+                    depotLinked,
+                    depotLinked ? tag.getString(TAG_DEPOT_DIMENSION) : "",
+                    depotLinked ? tag.getLong(TAG_DEPOT_POS) : 0L,
+                    outputDay,
+                    Math.max(0, tag.getInt(TAG_OUTPUT_TODAY)),
+                    lifetimeOutput
             );
         }
 
@@ -430,11 +607,84 @@ public final class SettlementSavedData extends SavedData {
             tag.putLong(TAG_POS, pos);
             tag.putUUID(TAG_SETTLEMENT_ID, settlementId);
             tag.putString(TAG_TYPE, type.serializedName());
+            tag.putBoolean(TAG_DEPOT_LINKED, depotLinked);
+            if (depotLinked) {
+                tag.putString(TAG_DEPOT_DIMENSION, depotDimension);
+                tag.putLong(TAG_DEPOT_POS, depotPos);
+            }
+            tag.putLong(TAG_OUTPUT_DAY, outputDay);
+            tag.putInt(TAG_OUTPUT_TODAY, outputToday);
+            tag.putLong(TAG_LIFETIME_OUTPUT, lifetimeOutput);
             return tag;
         }
 
         String locationKey() {
             return Settlement.locationKey(dimension, pos);
+        }
+
+        boolean isLinkedToDepot(String targetDimension, long targetPos) {
+            return depotLinked && depotDimension.equals(targetDimension) && depotPos == targetPos;
+        }
+
+        IndustrySite withSettlement(UUID newSettlementId) {
+            return new IndustrySite(
+                    dimension,
+                    pos,
+                    newSettlementId,
+                    type,
+                    depotLinked,
+                    depotDimension,
+                    depotPos,
+                    outputDay,
+                    outputToday,
+                    lifetimeOutput
+            );
+        }
+
+        IndustrySite withDepotLink(String newDepotDimension, long newDepotPos) {
+            return new IndustrySite(
+                    dimension,
+                    pos,
+                    settlementId,
+                    type,
+                    true,
+                    newDepotDimension,
+                    newDepotPos,
+                    outputDay,
+                    outputToday,
+                    lifetimeOutput
+            );
+        }
+
+        IndustrySite withoutDepotLink() {
+            return new IndustrySite(
+                    dimension,
+                    pos,
+                    settlementId,
+                    type,
+                    false,
+                    "",
+                    0L,
+                    outputDay,
+                    outputToday,
+                    lifetimeOutput
+            );
+        }
+
+        IndustrySite recordOutput(long day, int amount) {
+            int newToday = outputDay == day ? outputToday + amount : amount;
+            return new IndustrySite(
+                    dimension,
+                    pos,
+                    settlementId,
+                    type,
+                    depotLinked,
+                    depotDimension,
+                    depotPos,
+                    day,
+                    newToday,
+                    lifetimeOutput + amount
+            );
         }
     }
 }

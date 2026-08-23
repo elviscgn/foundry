@@ -93,11 +93,8 @@ dependencies {
     // Intuitive ore surveying and Create-powered extraction. Foundry forces finite reserves at runtime.
     implementation fg.deobf("maven.modrinth:ResbpANg:${create_ore_excavation_version}")
 
-    // Tectonic v3 requires Lithostitched for worldgen configurability and compatibility.
-    implementation fg.deobf("curse.maven:lithostitched-936015:6742615")
-
-    // Terrain substrate for compact continents, navigable coastlines, and domestic islands.
-    implementation fg.deobf("maven.modrinth:lWDHr9jE:${tectonic_version}")
+    // Stable Forge 1.20.1 terrain substrate for compact national geography.
+    implementation fg.deobf("curse.maven:tectonic-686836:${tectonic_file_id}")
 
     // Blueprint/urban-construction engine available in the dev runtime for Foundry development plots.
     runtimeOnly fg.deobf("curse.maven:structurize-298744:8610456")

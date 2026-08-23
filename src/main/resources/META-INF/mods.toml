@@ -38,6 +38,13 @@ ordering="AFTER"
 side="BOTH"
 
 [[dependencies.${mod_id}]]
+modId="lithostitched"
+mandatory=true
+versionRange="[1.4.11,1.5.0)"
+ordering="AFTER"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
 modId="tectonic"
 mandatory=true
 versionRange="${tectonic_version_range}"

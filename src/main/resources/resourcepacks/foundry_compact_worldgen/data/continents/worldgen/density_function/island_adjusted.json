@@ -11,7 +11,7 @@
         "argument2": {
           "type": "minecraft:noise",
           "noise": "continents:island_amount",
-          "xz_scale": 0.75,
+          "xz_scale": 1.70,
           "y_scale": 0.0
         }
       }

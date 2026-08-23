@@ -18,7 +18,7 @@
                   "argument1": {
                     "type": "minecraft:shifted_noise",
                     "noise": "tectonic:parameter/continentalness",
-                    "xz_scale": 0.95,
+                    "xz_scale": 2.85,
                     "y_scale": 0,
                     "shift_x": "minecraft:shift_x",
                     "shift_y": 0,
@@ -31,7 +31,7 @@
                   "argument1": {
                     "type": "minecraft:shifted_noise",
                     "noise": "tectonic:parameter/erosion",
-                    "xz_scale": 2.10,
+                    "xz_scale": 6.30,
                     "y_scale": 0,
                     "shift_x": "minecraft:shift_x",
                     "shift_y": 0,

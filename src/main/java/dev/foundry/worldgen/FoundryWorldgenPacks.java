@@ -32,18 +32,24 @@ public final class FoundryWorldgenPacks {
                 .getFile()
                 .findResource(COMPACT_WORLDGEN_PATH);
         Pack.ResourcesSupplier supplier = id -> new PathPackResources(id, resourcePath, false);
-        Pack pack = Pack.readMetaAndCreate(
+        Pack.Info info = Pack.readPackInfo(COMPACT_WORLDGEN_ID, supplier);
+        if (info == null) {
+            return;
+        }
+
+        // Required + fixed at TOP so Tectonic's own built-in pack cannot silently replace
+        // Foundry's national-scale noise-router entry during world creation/reload.
+        Pack pack = Pack.create(
                 COMPACT_WORLDGEN_ID,
                 Component.literal("Foundry Compact National Worldgen"),
                 true,
                 supplier,
+                info,
                 PackType.SERVER_DATA,
                 Pack.Position.TOP,
+                true,
                 PackSource.BUILT_IN
         );
-
-        if (pack != null) {
-            event.addRepositorySource(consumer -> consumer.accept(pack));
-        }
+        event.addRepositorySource(consumer -> consumer.accept(pack));
     }
 }

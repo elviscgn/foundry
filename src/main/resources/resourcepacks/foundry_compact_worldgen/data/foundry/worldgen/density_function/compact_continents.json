@@ -18,29 +18,29 @@
                   "argument1": {
                     "type": "minecraft:shifted_noise",
                     "noise": "tectonic:parameter/continentalness",
-                    "xz_scale": 0.62,
+                    "xz_scale": 0.50,
                     "y_scale": 0,
                     "shift_x": "minecraft:shift_x",
                     "shift_y": 0,
                     "shift_z": "minecraft:shift_z"
                   },
-                  "argument2": 0.88
+                  "argument2": 0.84
                 },
                 "argument2": {
                   "type": "minecraft:mul",
                   "argument1": {
                     "type": "minecraft:shifted_noise",
-                    "noise": "tectonic:parameter/continentalness",
-                    "xz_scale": 1.55,
+                    "noise": "tectonic:parameter/erosion",
+                    "xz_scale": 1.35,
                     "y_scale": 0,
                     "shift_x": "minecraft:shift_x",
                     "shift_y": 0,
                     "shift_z": "minecraft:shift_z"
                   },
-                  "argument2": 0.12
+                  "argument2": 0.16
                 }
               },
-              "argument2": 0.08
+              "argument2": 0.10
             },
             "min": -1.05,
             "max": 1.0
@@ -63,9 +63,9 @@
             "value": -0.19
           },
           {
-            "location": 1,
+            "location": 1.0,
             "derivative": 1.2,
-            "value": 1
+            "value": 1.0
           }
         ]
       }

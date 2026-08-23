@@ -6,6 +6,7 @@ import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModBlocks;
 import dev.foundry.registry.ModItems;
 import dev.foundry.worldgen.FoundryWorldgenPacks;
+import dev.foundry.worldgen.FoundryWorldgenTypes;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
@@ -23,6 +24,7 @@ public final class Foundry {
         ModBlocks.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlockEntities.register(modEventBus);
+        FoundryWorldgenTypes.register(modEventBus);
         FoundryNetwork.register();
         modEventBus.addListener(this::addCreativeTabContents);
         modEventBus.addListener(EventPriority.LOWEST, FoundryWorldgenPacks::register);

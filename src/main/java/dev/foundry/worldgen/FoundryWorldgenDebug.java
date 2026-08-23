@@ -2,8 +2,10 @@ package dev.foundry.worldgen;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import dev.foundry.Foundry;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.ChunkGenerator;
@@ -22,18 +24,16 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Development-only style diagnostic for tuning Tiger Ascent's national-scale geography.
+ * Development-only diagnostic for tuning Tiger Ascent's national-scale geography.
  *
- * <p>The command does not need explored/generated chunks. It samples the active chunk generator
- * and noise router directly, then writes a single PNG containing both predicted land/water and
- * the active continentalness field. That lets worldgen tuning be judged at 8-12k block scale
- * instead of from ground-level screenshots.</p>
+ * <p>The command samples the active chunk generator and noise router directly, so the map does
+ * not depend on explored chunks. It always writes a stable worldgen-latest.png file so the
+ * current result is easy to find and upload for review.</p>
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class FoundryWorldgenDebug {
@@ -41,6 +41,8 @@ public final class FoundryWorldgenDebug {
     private static final int DEFAULT_STEP = 32;
     private static final int MAX_SAMPLES_PER_AXIS = 512;
     private static final int GRID_BLOCKS = 1_000;
+    private static final String LATEST_PNG = "worldgen-latest.png";
+    private static final String LATEST_REPORT = "worldgen-latest.txt";
 
     private FoundryWorldgenDebug() {
     }
@@ -74,11 +76,19 @@ public final class FoundryWorldgenDebug {
         int samples = (requestedSpan + step - 1) / step;
         if (samples > MAX_SAMPLES_PER_AXIS) {
             int suggestedStep = (requestedSpan + MAX_SAMPLES_PER_AXIS - 1) / MAX_SAMPLES_PER_AXIS;
-            source.sendFailure(Component.literal(
+            source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT REJECTED")
+                    .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+            source.sendSystemMessage(Component.literal(
                     "Map would be " + samples + "x" + samples + " samples. Use step >= " + suggestedStep + "."
-            ));
+            ).withStyle(ChatFormatting.RED));
             return 0;
         }
+
+        source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT STARTED")
+                .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
+        source.sendSystemMessage(Component.literal(
+                "Sampling " + requestedSpan + " x " + requestedSpan + " blocks at " + step + "-block resolution..."
+        ).withStyle(ChatFormatting.GRAY));
 
         try {
             ServerLevel level = source.getLevel();
@@ -147,10 +157,8 @@ public final class FoundryWorldgenDebug {
 
             Path outputDir = FMLPaths.GAMEDIR.get().resolve("foundry-debug");
             Files.createDirectories(outputDir);
-            String stem = "worldgen-" + level.dimension().location().toString().replace(':', '_')
-                    + "-x" + centerX + "-z" + centerZ + "-span" + coveredSpan + "-step" + step;
-            Path pngPath = outputDir.resolve(stem + ".png");
-            Path reportPath = outputDir.resolve(stem + ".txt");
+            Path pngPath = outputDir.resolve(LATEST_PNG).toAbsolutePath().normalize();
+            Path reportPath = outputDir.resolve(LATEST_REPORT).toAbsolutePath().normalize();
             ImageIO.write(diagnostic, "png", pngPath.toFile());
 
             String largestText = largest.areaSamples() == 0
@@ -166,23 +174,38 @@ public final class FoundryWorldgenDebug {
                     + "largest visible connected landmass: " + largestText + "\n"
                     + "largest touches map edge: " + largest.touchesEdge() + "\n"
                     + String.format(Locale.ROOT, "continentalness range: %.3f to %.3f\n", minContinentalness, maxContinentalness)
-                    + "PNG: " + pngPath.toAbsolutePath() + "\n";
+                    + "PNG: " + pngPath + "\n";
             Files.writeString(reportPath, report);
 
-            String success = String.format(
+            source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT SUCCESS")
+                    .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+            source.sendSystemMessage(Component.literal("UPLOAD THIS FILE HERE: ")
+                    .withStyle(ChatFormatting.WHITE)
+                    .append(Component.literal("run/foundry-debug/" + LATEST_PNG)
+                            .withStyle(ChatFormatting.AQUA, ChatFormatting.UNDERLINE)));
+            source.sendSystemMessage(Component.literal("[COPY FULL PATH]")
+                    .withStyle(style -> style
+                            .withColor(ChatFormatting.AQUA)
+                            .withUnderlined(true)
+                            .withClickEvent(new ClickEvent(
+                                    ClickEvent.Action.COPY_TO_CLIPBOARD,
+                                    pngPath.toString()
+                            ))));
+            source.sendSystemMessage(Component.literal(String.format(
                     Locale.ROOT,
-                    "Worldgen map exported: %s | land %.1f%% | largest %s",
-                    pngPath.toAbsolutePath(),
+                    "land %.1f%% | largest visible landmass %s | span %,d blocks",
                     landShare,
-                    largestText
-            );
-            source.sendSuccess(() -> Component.literal(success), false);
+                    largestText,
+                    coveredSpan
+            )).withStyle(ChatFormatting.GRAY));
             return 1;
         } catch (Exception exception) {
             FoundryWorldgenDebugLog.error("Failed to export worldgen diagnostic", exception);
-            source.sendFailure(Component.literal(
-                    "Worldgen map export failed: " + exception.getClass().getSimpleName() + ": " + exception.getMessage()
-            ));
+            source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT FAILED")
+                    .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+            source.sendSystemMessage(Component.literal(
+                    exception.getClass().getSimpleName() + ": " + String.valueOf(exception.getMessage())
+            ).withStyle(ChatFormatting.RED));
             return 0;
         }
     }

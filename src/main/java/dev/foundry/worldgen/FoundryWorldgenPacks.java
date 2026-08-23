@@ -3,7 +3,7 @@ package dev.foundry.worldgen;
 import dev.foundry.Foundry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.packs.PackType;
-import net.minecraft.server.packs.PathPackResources.PathResourcesSupplier;
+import net.minecraft.server.packs.PathPackResources;
 import net.minecraft.server.packs.repository.Pack;
 import net.minecraft.server.packs.repository.PackSource;
 import net.minecraftforge.event.AddPackFindersEvent;
@@ -31,7 +31,7 @@ public final class FoundryWorldgenPacks {
                 .getModFileById(Foundry.MOD_ID)
                 .getFile()
                 .findResource(COMPACT_WORLDGEN_PATH);
-        PathResourcesSupplier supplier = new PathResourcesSupplier(resourcePath, false);
+        Pack.ResourcesSupplier supplier = id -> new PathPackResources(id, resourcePath, false);
         Pack pack = Pack.readMetaAndCreate(
                 COMPACT_WORLDGEN_ID,
                 Component.literal("Foundry Compact National Worldgen"),

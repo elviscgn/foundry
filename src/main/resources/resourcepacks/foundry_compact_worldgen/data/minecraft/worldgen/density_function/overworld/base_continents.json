@@ -4,8 +4,8 @@
     "type": "minecraft:flat_cache",
     "argument": {
       "type": "minecraft:shifted_noise",
-      "noise": "minecraft:continentalness",
-      "xz_scale": 0.90,
+      "noise": "foundry:compact_continentalness",
+      "xz_scale": 0.13,
       "y_scale": 0.0,
       "shift_x": "minecraft:shift_x",
       "shift_y": 0.0,

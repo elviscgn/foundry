@@ -8,9 +8,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraft.world.level.levelgen.DensityFunction;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -29,11 +27,13 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Development-only diagnostic for tuning Tiger Ascent's national-scale geography.
+ * Fast development diagnostic for tuning Tiger Ascent's national-scale geography.
  *
- * <p>The command samples the active chunk generator and noise router directly, so the map does
- * not depend on explored chunks. It always writes a stable worldgen-latest.png file so the
- * current result is easy to find and upload for review.</p>
+ * <p>This deliberately samples the active continentalness router directly instead of asking the
+ * chunk generator for a full terrain height at every pixel. Full height generation was far too
+ * expensive for a 12k-block overview and could stall the integrated server for minutes. The fast
+ * mask uses Minecraft's ocean/land continentalness boundary (-0.19), which is exactly the layer we
+ * are tuning for continent size and ocean separation.</p>
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class FoundryWorldgenDebug {
@@ -41,6 +41,7 @@ public final class FoundryWorldgenDebug {
     private static final int DEFAULT_STEP = 32;
     private static final int MAX_SAMPLES_PER_AXIS = 512;
     private static final int GRID_BLOCKS = 1_000;
+    private static final double OCEAN_LAND_THRESHOLD = -0.19;
     private static final String LATEST_PNG = "worldgen-latest.png";
     private static final String LATEST_REPORT = "worldgen-latest.txt";
 
@@ -84,18 +85,19 @@ public final class FoundryWorldgenDebug {
             return 0;
         }
 
-        source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT STARTED")
+        source.sendSystemMessage(Component.literal("[Foundry] FAST WORLDGEN EXPORT STARTED")
                 .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
         source.sendSystemMessage(Component.literal(
-                "Sampling " + requestedSpan + " x " + requestedSpan + " blocks at " + step + "-block resolution..."
+                "Sampling active continentalness across " + requestedSpan + " x " + requestedSpan
+                        + " blocks at " + step + "-block resolution..."
         ).withStyle(ChatFormatting.GRAY));
+
+        long startedNanos = System.nanoTime();
 
         try {
             ServerLevel level = source.getLevel();
             RandomState randomState = level.getChunkSource().randomState();
-            ChunkGenerator generator = level.getChunkSource().getGenerator();
             DensityFunction continentalness = randomState.router().continents();
-            int seaLevel = generator.getSeaLevel();
 
             int centerX = (int) Math.floor(source.getPosition().x);
             int centerZ = (int) Math.floor(source.getPosition().z);
@@ -103,7 +105,7 @@ public final class FoundryWorldgenDebug {
             int startX = centerX - coveredSpan / 2;
             int startZ = centerZ - coveredSpan / 2;
 
-            BufferedImage terrain = new BufferedImage(samples, samples, BufferedImage.TYPE_INT_ARGB);
+            BufferedImage mask = new BufferedImage(samples, samples, BufferedImage.TYPE_INT_ARGB);
             BufferedImage continents = new BufferedImage(samples, samples, BufferedImage.TYPE_INT_ARGB);
             boolean[] landMask = new boolean[samples * samples];
 
@@ -117,42 +119,37 @@ public final class FoundryWorldgenDebug {
                     int worldX = startX + px * step;
                     int index = py * samples + px;
 
-                    int terrainFloor = generator.getBaseHeight(
-                            worldX,
-                            worldZ,
-                            Heightmap.Types.OCEAN_FLOOR_WG,
-                            level,
-                            randomState
-                    );
-                    boolean isLand = terrainFloor > seaLevel;
+                    double c = continentalness.compute(new DensityFunction.SinglePointContext(worldX, 0, worldZ));
+                    minContinentalness = Math.min(minContinentalness, c);
+                    maxContinentalness = Math.max(maxContinentalness, c);
+
+                    boolean isLand = c >= OCEAN_LAND_THRESHOLD;
                     landMask[index] = isLand;
                     if (isLand) {
                         landSamples++;
                     }
-                    terrain.setRGB(px, py, terrainColor(terrainFloor, seaLevel).getRGB());
 
-                    double c = continentalness.compute(new DensityFunction.SinglePointContext(worldX, seaLevel, worldZ));
-                    minContinentalness = Math.min(minContinentalness, c);
-                    maxContinentalness = Math.max(maxContinentalness, c);
+                    mask.setRGB(px, py, maskColor(c).getRGB());
                     continents.setRGB(px, py, continentalnessColor(c).getRGB());
                 }
             }
 
             LargestComponent largest = findLargestLandComponent(landMask, samples, step);
             double landShare = landSamples * 100.0 / landMask.length;
+            double elapsedSeconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0;
 
             BufferedImage diagnostic = composeDiagnostic(
-                    terrain,
+                    mask,
                     continents,
                     startX,
                     startZ,
                     coveredSpan,
                     step,
-                    seaLevel,
                     landShare,
                     largest,
                     minContinentalness,
-                    maxContinentalness
+                    maxContinentalness,
+                    elapsedSeconds
             );
 
             Path outputDir = FMLPaths.GAMEDIR.get().resolve("foundry-debug");
@@ -165,15 +162,16 @@ public final class FoundryWorldgenDebug {
                     ? "none"
                     : (largest.touchesEdge() ? ">= " : "")
                     + largest.widthBlocks() + " x " + largest.heightBlocks() + " blocks";
-            String report = "Foundry worldgen diagnostic\n"
+            String report = "Foundry fast worldgen diagnostic\n"
                     + "center: " + centerX + ", " + centerZ + "\n"
                     + "span: " + coveredSpan + " blocks\n"
                     + "sample step: " + step + " blocks\n"
-                    + "sea level: " + seaLevel + "\n"
+                    + "land/ocean classification: continentalness >= " + OCEAN_LAND_THRESHOLD + " is land\n"
                     + String.format(Locale.ROOT, "land share: %.1f%%\n", landShare)
                     + "largest visible connected landmass: " + largestText + "\n"
                     + "largest touches map edge: " + largest.touchesEdge() + "\n"
                     + String.format(Locale.ROOT, "continentalness range: %.3f to %.3f\n", minContinentalness, maxContinentalness)
+                    + String.format(Locale.ROOT, "sampling time: %.2f seconds\n", elapsedSeconds)
                     + "PNG: " + pngPath + "\n";
             Files.writeString(reportPath, report);
 
@@ -193,7 +191,8 @@ public final class FoundryWorldgenDebug {
                             ))));
             source.sendSystemMessage(Component.literal(String.format(
                     Locale.ROOT,
-                    "land %.1f%% | largest visible landmass %s | span %,d blocks",
+                    "%.2fs | land %.1f%% | largest visible landmass %s | span %,d blocks",
+                    elapsedSeconds,
                     landShare,
                     largestText,
                     coveredSpan
@@ -211,22 +210,22 @@ public final class FoundryWorldgenDebug {
     }
 
     private static BufferedImage composeDiagnostic(
-            BufferedImage terrain,
+            BufferedImage mask,
             BufferedImage continents,
             int startX,
             int startZ,
             int coveredSpan,
             int step,
-            int seaLevel,
             double landShare,
             LargestComponent largest,
             double minContinentalness,
-            double maxContinentalness
+            double maxContinentalness,
+            double elapsedSeconds
     ) {
-        int panelSize = terrain.getWidth();
+        int panelSize = mask.getWidth();
         int margin = 28;
         int header = 68;
-        int footer = 78;
+        int footer = 96;
         int gap = 24;
         int width = margin * 2 + panelSize * 2 + gap;
         int height = header + panelSize + footer;
@@ -240,26 +239,26 @@ public final class FoundryWorldgenDebug {
 
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
             g.setColor(Color.WHITE);
-            g.drawString("PREDICTED LAND / WATER", margin, 24);
+            g.drawString("CONTINENT MASK (FAST)", margin, 24);
             g.drawString("ACTIVE CONTINENTALNESS", margin + panelSize + gap, 24);
 
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
             g.setColor(new Color(190, 196, 205));
-            g.drawString("Ocean floor vs sea level " + seaLevel, margin, 44);
+            g.drawString("Ocean c < -0.19 | land c >= -0.19", margin, 44);
             g.drawString("Raw router output; blue = oceanward, green = landward", margin + panelSize + gap, 44);
 
             int panelY = header;
-            int terrainX = margin;
+            int maskX = margin;
             int continentsX = margin + panelSize + gap;
-            g.drawImage(terrain, terrainX, panelY, null);
+            g.drawImage(mask, maskX, panelY, null);
             g.drawImage(continents, continentsX, panelY, null);
 
-            drawGrid(g, terrainX, panelY, panelSize, startX, startZ, coveredSpan, step);
+            drawGrid(g, maskX, panelY, panelSize, startX, startZ, coveredSpan, step);
             drawGrid(g, continentsX, panelY, panelSize, startX, startZ, coveredSpan, step);
 
             g.setColor(new Color(245, 245, 245));
             g.setStroke(new BasicStroke(1.2f));
-            g.drawRect(terrainX, panelY, panelSize - 1, panelSize - 1);
+            g.drawRect(maskX, panelY, panelSize - 1, panelSize - 1);
             g.drawRect(continentsX, panelY, panelSize - 1, panelSize - 1);
 
             String largestText = largest.areaSamples() == 0
@@ -273,6 +272,7 @@ public final class FoundryWorldgenDebug {
             g.drawString(String.format(Locale.ROOT, "span %,d blocks | step %d | land %.1f%%", coveredSpan, step, landShare), margin, footerY);
             g.drawString("largest visible landmass: " + largestText, margin, footerY + 18);
             g.drawString(String.format(Locale.ROOT, "continentalness %.3f .. %.3f", minContinentalness, maxContinentalness), margin, footerY + 36);
+            g.drawString(String.format(Locale.ROOT, "sampling %.2fs", elapsedSeconds), margin, footerY + 54);
             g.drawString("N ^   +X east ->   +Z south", continentsX, footerY);
         } finally {
             g.dispose();
@@ -311,27 +311,17 @@ public final class FoundryWorldgenDebug {
         }
     }
 
-    private static Color terrainColor(int terrainFloor, int seaLevel) {
-        int relative = terrainFloor - seaLevel;
-        if (relative <= -45) {
-            return new Color(20, 47, 86);
+    private static Color maskColor(double value) {
+        if (value < -0.45) {
+            return new Color(23, 60, 105);
         }
-        if (relative <= -15) {
-            return new Color(31, 81, 125);
+        if (value < OCEAN_LAND_THRESHOLD) {
+            return new Color(55, 116, 157);
         }
-        if (relative <= 0) {
-            return new Color(57, 122, 159);
-        }
-        if (relative <= 4) {
+        if (value < -0.11) {
             return new Color(194, 181, 128);
         }
-        if (relative <= 45) {
-            return new Color(83, 127, 74);
-        }
-        if (relative <= 100) {
-            return new Color(116, 103, 77);
-        }
-        return new Color(180, 181, 179);
+        return new Color(83, 127, 74);
     }
 
     private static Color continentalnessColor(double value) {
@@ -341,7 +331,7 @@ public final class FoundryWorldgenDebug {
         if (value < -0.45) {
             return new Color(29, 78, 121);
         }
-        if (value < -0.19) {
+        if (value < OCEAN_LAND_THRESHOLD) {
             return new Color(62, 130, 159);
         }
         if (value < 0.0) {
@@ -357,6 +347,8 @@ public final class FoundryWorldgenDebug {
         boolean[] visited = new boolean[land.length];
         int[] queue = new int[land.length];
         LargestComponent best = new LargestComponent(0, 0, 0, false);
+        int[] dx = {1, -1, 0, 0};
+        int[] dy = {0, 0, 1, -1};
 
         for (int start = 0; start < land.length; start++) {
             if (!land[start] || visited[start]) {
@@ -388,21 +380,16 @@ public final class FoundryWorldgenDebug {
                     touchesEdge = true;
                 }
 
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dx == 0 && dy == 0) {
-                            continue;
-                        }
-                        int nx = x + dx;
-                        int ny = y + dy;
-                        if (nx < 0 || ny < 0 || nx >= size || ny >= size) {
-                            continue;
-                        }
-                        int neighbor = ny * size + nx;
-                        if (land[neighbor] && !visited[neighbor]) {
-                            visited[neighbor] = true;
-                            queue[tail++] = neighbor;
-                        }
+                for (int direction = 0; direction < 4; direction++) {
+                    int nx = x + dx[direction];
+                    int ny = y + dy[direction];
+                    if (nx < 0 || ny < 0 || nx >= size || ny >= size) {
+                        continue;
+                    }
+                    int neighbor = ny * size + nx;
+                    if (land[neighbor] && !visited[neighbor]) {
+                        visited[neighbor] = true;
+                        queue[tail++] = neighbor;
                     }
                 }
             }

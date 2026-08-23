@@ -31,13 +31,6 @@ ordering="NONE"
 side="BOTH"
 
 [[dependencies.${mod_id}]]
-modId="geolosys"
-mandatory=true
-versionRange="${geolosys_version_range}"
-ordering="AFTER"
-side="BOTH"
-
-[[dependencies.${mod_id}]]
 modId="createoreexcavation"
 mandatory=true
 versionRange="${create_ore_excavation_version_range}"

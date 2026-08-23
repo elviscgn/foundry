@@ -42,8 +42,9 @@ public final class FoundryWorldgenDebug {
     private static final int MAX_SAMPLES_PER_AXIS = 512;
     private static final int GRID_BLOCKS = 1_000;
     private static final double OCEAN_LAND_THRESHOLD = -0.19;
-    private static final String LATEST_PNG = "worldgen-latest.png";
-    private static final String LATEST_REPORT = "worldgen-latest.txt";
+    private static final String DIAGNOSTIC_VERSION = "FAST-V2 / SCALE-CHECK";
+    private static final String LATEST_PNG = "worldgen-fast-latest.png";
+    private static final String LATEST_REPORT = "worldgen-fast-latest.txt";
 
     private FoundryWorldgenDebug() {
     }
@@ -85,7 +86,7 @@ public final class FoundryWorldgenDebug {
             return 0;
         }
 
-        source.sendSystemMessage(Component.literal("[Foundry] FAST WORLDGEN EXPORT STARTED")
+        source.sendSystemMessage(Component.literal("[Foundry] FAST WORLDGEN EXPORT STARTED — " + DIAGNOSTIC_VERSION)
                 .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
         source.sendSystemMessage(Component.literal(
                 "Sampling active continentalness across " + requestedSpan + " x " + requestedSpan
@@ -163,6 +164,7 @@ public final class FoundryWorldgenDebug {
                     : (largest.touchesEdge() ? ">= " : "")
                     + largest.widthBlocks() + " x " + largest.heightBlocks() + " blocks";
             String report = "Foundry fast worldgen diagnostic\n"
+                    + "diagnostic version: " + DIAGNOSTIC_VERSION + "\n"
                     + "center: " + centerX + ", " + centerZ + "\n"
                     + "span: " + coveredSpan + " blocks\n"
                     + "sample step: " + step + " blocks\n"
@@ -175,7 +177,7 @@ public final class FoundryWorldgenDebug {
                     + "PNG: " + pngPath + "\n";
             Files.writeString(reportPath, report);
 
-            source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT SUCCESS")
+            source.sendSystemMessage(Component.literal("[Foundry] WORLDGEN EXPORT SUCCESS — " + DIAGNOSTIC_VERSION)
                     .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
             source.sendSystemMessage(Component.literal("UPLOAD THIS FILE HERE: ")
                     .withStyle(ChatFormatting.WHITE)
@@ -225,7 +227,7 @@ public final class FoundryWorldgenDebug {
         int panelSize = mask.getWidth();
         int margin = 28;
         int header = 68;
-        int footer = 96;
+        int footer = 114;
         int gap = 24;
         int width = margin * 2 + panelSize * 2 + gap;
         int height = header + panelSize + footer;
@@ -239,7 +241,7 @@ public final class FoundryWorldgenDebug {
 
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 15));
             g.setColor(Color.WHITE);
-            g.drawString("CONTINENT MASK (FAST)", margin, 24);
+            g.drawString("CONTINENT MASK (FAST-V2)", margin, 24);
             g.drawString("ACTIVE CONTINENTALNESS", margin + panelSize + gap, 24);
 
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
@@ -269,10 +271,11 @@ public final class FoundryWorldgenDebug {
             int footerY = panelY + panelSize + 24;
             g.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
             g.setColor(new Color(225, 229, 235));
-            g.drawString(String.format(Locale.ROOT, "span %,d blocks | step %d | land %.1f%%", coveredSpan, step, landShare), margin, footerY);
-            g.drawString("largest visible landmass: " + largestText, margin, footerY + 18);
-            g.drawString(String.format(Locale.ROOT, "continentalness %.3f .. %.3f", minContinentalness, maxContinentalness), margin, footerY + 36);
-            g.drawString(String.format(Locale.ROOT, "sampling %.2fs", elapsedSeconds), margin, footerY + 54);
+            g.drawString("diagnostic: " + DIAGNOSTIC_VERSION, margin, footerY);
+            g.drawString(String.format(Locale.ROOT, "span %,d blocks | step %d | land %.1f%%", coveredSpan, step, landShare), margin, footerY + 18);
+            g.drawString("largest visible landmass: " + largestText, margin, footerY + 36);
+            g.drawString(String.format(Locale.ROOT, "continentalness %.3f .. %.3f", minContinentalness, maxContinentalness), margin, footerY + 54);
+            g.drawString(String.format(Locale.ROOT, "sampling %.2fs", elapsedSeconds), margin, footerY + 72);
             g.drawString("N ^   +X east ->   +Z south", continentsX, footerY);
         } finally {
             g.dispose();

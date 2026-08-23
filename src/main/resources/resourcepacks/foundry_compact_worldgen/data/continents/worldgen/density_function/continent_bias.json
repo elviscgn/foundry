@@ -5,7 +5,7 @@
     "argument": {
       "type": "minecraft:noise",
       "noise": "continents:continent_bias",
-      "xz_scale": 0.99,
+      "xz_scale": 0.1425,
       "y_scale": 0.0
     }
   }

@@ -1,6 +1,7 @@
 package dev.foundry.mixin;
 
 import dev.foundry.worldgen.StrategicMacroMask;
+import dev.foundry.worldgen.StrategicOceanClamp;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.DensityFunction;
@@ -19,10 +20,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Final authority over Tiger Ascent macro geography.
  *
- * <p>Tectonic and Continents are allowed to finish all of their normal datapack and Lithostitched
- * wiring first. At the end of RandomState construction, Foundry clamps the live Overworld
- * continentalness graph itself. This deliberately avoids depending on datapack priority, resource
- * replacement order, or compatibility modifiers.</p>
+ * <p>Tectonic and Continents finish all normal datapack/Lithostitched wiring first. Foundry then
+ * modifies the finished live Overworld NoiseRouter exactly once. The public continentalness
+ * channel is hard-bounded by the strategic mask and final terrain density is hard-bounded by a
+ * matching ocean-floor clamp, so neither biome geography nor physical blocks can reconnect across
+ * the guaranteed sea corridors.</p>
  */
 @Mixin(RandomState.class)
 public abstract class RandomStateMixin {
@@ -39,7 +41,7 @@ public abstract class RandomStateMixin {
             CallbackInfo callbackInfo
     ) {
         // Only touch the normal stone-and-water Overworld family. Nether/End/custom dimensions
-        // must keep their own routers completely untouched.
+        // keep their own routers completely untouched.
         if (settings.seaLevel() != 63
                 || !settings.defaultBlock().is(Blocks.STONE)
                 || !settings.defaultFluid().is(Blocks.WATER)) {
@@ -50,10 +52,9 @@ public abstract class RandomStateMixin {
         DensityFunction strategicMask = new StrategicMacroMask();
         DensityFunction boundedContinents = DensityFunctions.min(originalContinents, strategicMask);
 
-        // Terrain functions such as depth/finalDensity can hold references to the same
-        // continentalness function independently of NoiseRouter.continents(). Replace those
-        // references too, otherwise the climate map would be bounded while actual terrain could
-        // still form a giant mainland.
+        // Tectonic terrain functions can keep independent references to the same continentalness
+        // node. Replace those references inside the live router graph as well as clamping the
+        // top-level climate channel below.
         DensityFunction.Visitor clampVisitor = new DensityFunction.Visitor() {
             @Override
             public DensityFunction.NoiseHolder visitNoise(DensityFunction.NoiseHolder noiseHolder) {
@@ -71,9 +72,16 @@ public abstract class RandomStateMixin {
 
         NoiseRouter mapped = this.router.mapAll(clampVisitor);
 
-        // Force the public continentalness channel as the final operation as well. Even if another
-        // branch of the graph was structurally distinct, nothing can bypass this top-level clamp.
         DensityFunction finalContinents = DensityFunctions.min(mapped.continents(), strategicMask);
+
+        // This is the non-bypassable physical guarantee. Even if some terrain branch did not share
+        // the same continentalness node, its final density cannot rise above the strategic coastal
+        // shelf outside an envelope. Aquifers then fill the corridor to sea level as real ocean.
+        DensityFunction finalTerrain = DensityFunctions.min(
+                mapped.finalDensity(),
+                new StrategicOceanClamp()
+        );
+
         this.router = new NoiseRouter(
                 mapped.barrierNoise(),
                 mapped.fluidLevelFloodednessNoise(),
@@ -86,13 +94,13 @@ public abstract class RandomStateMixin {
                 mapped.depth(),
                 mapped.ridges(),
                 mapped.initialDensityWithoutJaggedness(),
-                mapped.finalDensity(),
+                finalTerrain,
                 mapped.veinToggle(),
                 mapped.veinRidged(),
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] Applied hard strategic macro clamp to the live Overworld NoiseRouter (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — strategic continents + physical ocean corridors (seed "
                 + seed + ")");
     }
 }

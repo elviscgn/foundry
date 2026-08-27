@@ -1,7 +1,6 @@
 package dev.foundry.mixin;
 
 import dev.foundry.worldgen.StrategicMacroMask;
-import dev.foundry.worldgen.StrategicOceanClamp;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.DensityFunction;
@@ -20,10 +19,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Final authority over Tiger Ascent macro geography.
  *
- * <p>Tectonic and Continents finish all normal wiring first. Foundry then modifies the finished
- * live Overworld NoiseRouter exactly once. Foundry owns macro scale/separation; Continents is
- * retained as an oceanward carving signal so its natural coastline structure survives inside the
- * hard strategic envelope. Final terrain density is also capped by the same seeded envelope.</p>
+ * <p>Tectonic and Continents finish all normal wiring first. Foundry then replaces the live
+ * Overworld continentalness graph with the seeded strategic field. Tectonic remains fully
+ * responsible for converting that field into physical terrain: mountains, shelves, ocean floors,
+ * caves and coast transitions are never clipped directly by Foundry.</p>
  */
 @Mixin(RandomState.class)
 public abstract class RandomStateMixin {
@@ -32,9 +31,8 @@ public abstract class RandomStateMixin {
     @Final
     private NoiseRouter router;
 
-    // Bias means Continents only cuts when its live field is meaningfully oceanward. This prevents
-    // the two independent masks from multiplying into an excessively watery world while still
-    // allowing Tectonic/Continents to carve natural bays, straits and coastal breakup.
+    // Continents is used only as an oceanward carving signal inside Foundry's bounded strategic
+    // land envelopes. It cannot expand land beyond the 500-3000 block macro contract.
     private static final double CONTINENTS_COAST_BIAS = 0.12;
     private static final double CONTINENTS_COAST_DETAIL = 0.32;
 
@@ -54,9 +52,6 @@ public abstract class RandomStateMixin {
         DensityFunction originalContinents = this.router.continents();
         DensityFunction strategicMask = new StrategicMacroMask(seed);
 
-        // Foundry is the hard outer boundary. Continents is shifted slightly landward, then used
-        // only as a subtractive/oceanward signal. It can carve the interior coastline but can never
-        // expand land beyond the 500-3000 block strategic envelope.
         DensityFunction coastSignal = DensityFunctions.add(
                 originalContinents,
                 DensityFunctions.constant(CONTINENTS_COAST_BIAS)
@@ -68,7 +63,10 @@ public abstract class RandomStateMixin {
         DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
         DensityFunction strategicContinents = DensityFunctions.min(strategicMask, detailedMask);
 
-        DensityFunction.Visitor clampVisitor = new DensityFunction.Visitor() {
+        // Replace every reference to the live continentalness node throughout Tectonic's finished
+        // router graph. This lets Tectonic's own depth/factor/final-density machinery produce the
+        // physical coast and ocean naturally instead of Foundry chopping finalDensity afterward.
+        DensityFunction.Visitor strategicVisitor = new DensityFunction.Visitor() {
             @Override
             public DensityFunction.NoiseHolder visitNoise(DensityFunction.NoiseHolder noiseHolder) {
                 return noiseHolder;
@@ -83,12 +81,7 @@ public abstract class RandomStateMixin {
             }
         };
 
-        NoiseRouter mapped = this.router.mapAll(clampVisitor);
-
-        DensityFunction finalTerrain = DensityFunctions.min(
-                mapped.finalDensity(),
-                new StrategicOceanClamp(seed)
-        );
+        NoiseRouter mapped = this.router.mapAll(strategicVisitor);
 
         this.router = new NoiseRouter(
                 mapped.barrierNoise(),
@@ -102,13 +95,13 @@ public abstract class RandomStateMixin {
                 mapped.depth(),
                 mapped.ridges(),
                 mapped.initialDensityWithoutJaggedness(),
-                finalTerrain,
+                mapped.finalDensity(),
                 mapped.veinToggle(),
                 mapped.veinRidged(),
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — organic seeded strategic geography + physical ocean corridors (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — Tectonic owns physical terrain (seed "
                 + seed + ")");
     }
 }

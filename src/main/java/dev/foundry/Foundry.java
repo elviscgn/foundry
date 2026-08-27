@@ -5,9 +5,12 @@ import dev.foundry.network.FoundryNetwork;
 import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModBlocks;
 import dev.foundry.registry.ModItems;
+import dev.foundry.worldgen.FoundryWorldgenPacks;
+import dev.foundry.worldgen.FoundryWorldgenTypes;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -21,8 +24,10 @@ public final class Foundry {
         ModBlocks.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlockEntities.register(modEventBus);
+        FoundryWorldgenTypes.register(modEventBus);
         FoundryNetwork.register();
         modEventBus.addListener(this::addCreativeTabContents);
+        modEventBus.addListener(EventPriority.LOWEST, FoundryWorldgenPacks::register);
 
         // Tiger Ascent treats resource geography as exhaustible. Create Ore Excavation supplies
         // the finder/atlas/drilling UX while Foundry forces its reserve model out of infinite mode.

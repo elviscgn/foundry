@@ -38,6 +38,13 @@ ordering="AFTER"
 side="BOTH"
 
 [[dependencies.${mod_id}]]
+modId="tectonic"
+mandatory=true
+versionRange="${tectonic_version_range}"
+ordering="AFTER"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
 modId="structurize"
 mandatory=false
 versionRange="[1.0.742,)"

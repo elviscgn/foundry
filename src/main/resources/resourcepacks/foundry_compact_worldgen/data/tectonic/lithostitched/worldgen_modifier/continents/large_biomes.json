@@ -1,0 +1,6 @@
+{
+  "type": "lithostitched:wrap_density_function",
+  "priority": 2000,
+  "target_function": "tectonic:overworld_large_biomes/continents",
+  "wrapper_function": "foundry:compact_continents"
+}

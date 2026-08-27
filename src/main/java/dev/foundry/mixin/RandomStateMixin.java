@@ -20,11 +20,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Final authority over Tiger Ascent macro geography.
  *
- * <p>Tectonic and Continents finish all normal datapack/Lithostitched wiring first. Foundry then
- * modifies the finished live Overworld NoiseRouter exactly once. The strategic mask owns macro
- * landmass size/separation; Continents is retained only as oceanward coastline detail. Final
- * terrain density is additionally capped outside the same envelopes so physical blocks cannot
- * reconnect across the guaranteed sea corridors.</p>
+ * <p>Tectonic and Continents finish all normal wiring first. Foundry then modifies the finished
+ * live Overworld NoiseRouter exactly once. The seeded strategic mask owns macro landmass size and
+ * separation; Continents is retained only as oceanward coastline detail. Final terrain density is
+ * additionally capped outside the same seeded envelopes so physical blocks cannot reconnect across
+ * the guaranteed sea corridors.</p>
  */
 @Mixin(RandomState.class)
 public abstract class RandomStateMixin {
@@ -42,8 +42,6 @@ public abstract class RandomStateMixin {
             long seed,
             CallbackInfo callbackInfo
     ) {
-        // Only touch the normal stone-and-water Overworld family. Nether/End/custom dimensions
-        // keep their own routers completely untouched.
         if (settings.seaLevel() != 63
                 || !settings.defaultBlock().is(Blocks.STONE)
                 || !settings.defaultFluid().is(Blocks.WATER)) {
@@ -51,10 +49,11 @@ public abstract class RandomStateMixin {
         }
 
         DensityFunction originalContinents = this.router.continents();
-        DensityFunction strategicMask = new StrategicMacroMask();
+        DensityFunction strategicMask = new StrategicMacroMask(seed);
 
-        // The strategic mask is the landmass baseline. Continents can only cut oceanward detail
-        // into that baseline; it is never allowed to push land past the hard envelope.
+        // Strategic geography is the land baseline. Continents may cut extra oceanward coastline
+        // character into it, but can never expand land beyond Foundry's selected 500-3000 block
+        // strategic envelope.
         DensityFunction coastDetail = DensityFunctions.mul(
                 DensityFunctions.constant(CONTINENTS_COAST_DETAIL),
                 originalContinents
@@ -62,9 +61,6 @@ public abstract class RandomStateMixin {
         DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
         DensityFunction strategicContinents = DensityFunctions.min(strategicMask, detailedMask);
 
-        // Tectonic terrain functions can keep independent references to the same continentalness
-        // node. Replace those references inside the live router graph so terrain shaping sees the
-        // strategic field too, rather than only the climate/biome sampler seeing it.
         DensityFunction.Visitor clampVisitor = new DensityFunction.Visitor() {
             @Override
             public DensityFunction.NoiseHolder visitNoise(DensityFunction.NoiseHolder noiseHolder) {
@@ -82,16 +78,9 @@ public abstract class RandomStateMixin {
 
         NoiseRouter mapped = this.router.mapAll(clampVisitor);
 
-        // Top-level continentalness is forced to the strategic field directly. No later datapack or
-        // Lithostitched resource ordering participates after this point.
-        DensityFunction finalContinents = strategicContinents;
-
-        // Non-bypassable physical guarantee: even if a terrain branch did not share the exact
-        // original continentalness node, final density cannot rise above the strategic coastal
-        // shelf outside an envelope. Aquifers fill the corridor to sea level as real ocean.
         DensityFunction finalTerrain = DensityFunctions.min(
                 mapped.finalDensity(),
-                new StrategicOceanClamp()
+                new StrategicOceanClamp(seed)
         );
 
         this.router = new NoiseRouter(
@@ -101,7 +90,7 @@ public abstract class RandomStateMixin {
                 mapped.lavaNoise(),
                 mapped.temperature(),
                 mapped.vegetation(),
-                finalContinents,
+                strategicContinents,
                 mapped.erosion(),
                 mapped.depth(),
                 mapped.ridges(),
@@ -112,7 +101,7 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — strategic macro land + physical ocean corridors (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — seeded variable strategic land + physical ocean corridors (seed "
                 + seed + ")");
     }
 }

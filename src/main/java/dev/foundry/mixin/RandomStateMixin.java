@@ -21,10 +21,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Final authority over Tiger Ascent macro geography.
  *
  * <p>Tectonic and Continents finish all normal wiring first. Foundry then modifies the finished
- * live Overworld NoiseRouter exactly once. The seeded strategic mask owns macro landmass size and
- * separation; Continents is retained only as oceanward coastline detail. Final terrain density is
- * additionally capped outside the same seeded envelopes so physical blocks cannot reconnect across
- * the guaranteed sea corridors.</p>
+ * live Overworld NoiseRouter exactly once. Foundry owns macro scale/separation; Continents is
+ * retained as an oceanward carving signal so its natural coastline structure survives inside the
+ * hard strategic envelope. Final terrain density is also capped by the same seeded envelope.</p>
  */
 @Mixin(RandomState.class)
 public abstract class RandomStateMixin {
@@ -33,7 +32,11 @@ public abstract class RandomStateMixin {
     @Final
     private NoiseRouter router;
 
-    private static final double CONTINENTS_COAST_DETAIL = 0.20;
+    // Bias means Continents only cuts when its live field is meaningfully oceanward. This prevents
+    // the two independent masks from multiplying into an excessively watery world while still
+    // allowing Tectonic/Continents to carve natural bays, straits and coastal breakup.
+    private static final double CONTINENTS_COAST_BIAS = 0.12;
+    private static final double CONTINENTS_COAST_DETAIL = 0.32;
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void foundry$clampLiveOverworldRouter(
@@ -51,12 +54,16 @@ public abstract class RandomStateMixin {
         DensityFunction originalContinents = this.router.continents();
         DensityFunction strategicMask = new StrategicMacroMask(seed);
 
-        // Strategic geography is the land baseline. Continents may cut extra oceanward coastline
-        // character into it, but can never expand land beyond Foundry's selected 500-3000 block
-        // strategic envelope.
+        // Foundry is the hard outer boundary. Continents is shifted slightly landward, then used
+        // only as a subtractive/oceanward signal. It can carve the interior coastline but can never
+        // expand land beyond the 500-3000 block strategic envelope.
+        DensityFunction coastSignal = DensityFunctions.add(
+                originalContinents,
+                DensityFunctions.constant(CONTINENTS_COAST_BIAS)
+        );
         DensityFunction coastDetail = DensityFunctions.mul(
                 DensityFunctions.constant(CONTINENTS_COAST_DETAIL),
-                originalContinents
+                coastSignal
         );
         DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
         DensityFunction strategicContinents = DensityFunctions.min(strategicMask, detailedMask);
@@ -101,7 +108,7 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — seeded variable strategic land + physical ocean corridors (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — organic seeded strategic geography + physical ocean corridors (seed "
                 + seed + ")");
     }
 }

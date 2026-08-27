@@ -21,10 +21,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Final authority over Tiger Ascent macro geography.
  *
  * <p>Tectonic and Continents finish all normal datapack/Lithostitched wiring first. Foundry then
- * modifies the finished live Overworld NoiseRouter exactly once. The public continentalness
- * channel is hard-bounded by the strategic mask and final terrain density is hard-bounded by a
- * matching ocean-floor clamp, so neither biome geography nor physical blocks can reconnect across
- * the guaranteed sea corridors.</p>
+ * modifies the finished live Overworld NoiseRouter exactly once. The strategic mask owns macro
+ * landmass size/separation; Continents is retained only as oceanward coastline detail. Final
+ * terrain density is additionally capped outside the same envelopes so physical blocks cannot
+ * reconnect across the guaranteed sea corridors.</p>
  */
 @Mixin(RandomState.class)
 public abstract class RandomStateMixin {
@@ -32,6 +32,8 @@ public abstract class RandomStateMixin {
     @Shadow
     @Final
     private NoiseRouter router;
+
+    private static final double CONTINENTS_COAST_DETAIL = 0.20;
 
     @Inject(method = "<init>", at = @At("RETURN"))
     private void foundry$clampLiveOverworldRouter(
@@ -50,11 +52,19 @@ public abstract class RandomStateMixin {
 
         DensityFunction originalContinents = this.router.continents();
         DensityFunction strategicMask = new StrategicMacroMask();
-        DensityFunction boundedContinents = DensityFunctions.min(originalContinents, strategicMask);
+
+        // The strategic mask is the landmass baseline. Continents can only cut oceanward detail
+        // into that baseline; it is never allowed to push land past the hard envelope.
+        DensityFunction coastDetail = DensityFunctions.mul(
+                DensityFunctions.constant(CONTINENTS_COAST_DETAIL),
+                originalContinents
+        );
+        DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
+        DensityFunction strategicContinents = DensityFunctions.min(strategicMask, detailedMask);
 
         // Tectonic terrain functions can keep independent references to the same continentalness
-        // node. Replace those references inside the live router graph as well as clamping the
-        // top-level climate channel below.
+        // node. Replace those references inside the live router graph so terrain shaping sees the
+        // strategic field too, rather than only the climate/biome sampler seeing it.
         DensityFunction.Visitor clampVisitor = new DensityFunction.Visitor() {
             @Override
             public DensityFunction.NoiseHolder visitNoise(DensityFunction.NoiseHolder noiseHolder) {
@@ -64,7 +74,7 @@ public abstract class RandomStateMixin {
             @Override
             public DensityFunction apply(DensityFunction function) {
                 if (function == originalContinents || function.equals(originalContinents)) {
-                    return boundedContinents;
+                    return strategicContinents;
                 }
                 return function;
             }
@@ -72,11 +82,13 @@ public abstract class RandomStateMixin {
 
         NoiseRouter mapped = this.router.mapAll(clampVisitor);
 
-        DensityFunction finalContinents = DensityFunctions.min(mapped.continents(), strategicMask);
+        // Top-level continentalness is forced to the strategic field directly. No later datapack or
+        // Lithostitched resource ordering participates after this point.
+        DensityFunction finalContinents = strategicContinents;
 
-        // This is the non-bypassable physical guarantee. Even if some terrain branch did not share
-        // the same continentalness node, its final density cannot rise above the strategic coastal
-        // shelf outside an envelope. Aquifers then fill the corridor to sea level as real ocean.
+        // Non-bypassable physical guarantee: even if a terrain branch did not share the exact
+        // original continentalness node, final density cannot rise above the strategic coastal
+        // shelf outside an envelope. Aquifers fill the corridor to sea level as real ocean.
         DensityFunction finalTerrain = DensityFunctions.min(
                 mapped.finalDensity(),
                 new StrategicOceanClamp()
@@ -100,7 +112,7 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — strategic continents + physical ocean corridors (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD ROUTER CLAMP ACTIVE — strategic macro land + physical ocean corridors (seed "
                 + seed + ")");
     }
 }

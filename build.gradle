@@ -106,6 +106,9 @@ dependencies {
     implementation fg.deobf("curse.maven:tectonic-686836:${tectonic_file_id}")
     implementation fg.deobf("curse.maven:continents-682515:${continents_file_id}")
 
+    // Fullscreen terrain map for worldgen iteration. Runtime-only: Foundry does not compile against it.
+    runtimeOnly fg.deobf("curse.maven:journeymap-32274:${journeymap_file_id}")
+
     // Blueprint/urban-construction engine available in the dev runtime for Foundry development plots.
     runtimeOnly fg.deobf("curse.maven:structurize-298744:8610456")
     runtimeOnly fg.deobf("curse.maven:blockui-522992:6646544")

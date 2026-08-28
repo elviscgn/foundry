@@ -7,34 +7,32 @@ import net.minecraft.world.level.levelgen.DensityFunction;
 /**
  * Seeded strategic-scale geography envelope for Tiger Ascent.
  *
- * <p>Foundry owns strategic landmass scale/separation while Tectonic owns physical terrain
- * character. Strategic regions are not generated one-per-cell: a correlated activity field creates
- * clusters of large mainlands, medium/small fringe islands, and genuine open-ocean basins. Each
- * active region is then assembled from overlapping rotated lobes, peninsulas, optional satellites
- * and coordinate warping.</p>
+ * <p>Foundry owns macro landmass scale and separation while Tectonic owns physical terrain.
+ * Most strategic islands are intentionally around one thousand blocks across. Five-hundred-block
+ * islands are common enough to matter, while two-thousand-plus mainlands are deliberately rare.</p>
  *
- * <p>The hidden lattice is only a bounded candidate-search structure. Correlated activation,
- * heavy center jitter and a non-radial hard envelope prevent that scaffold from becoming visible in
- * the coastline. Substantial islands remain roughly 500-3000 blocks across.</p>
+ * <p>Visible landforms are assembled from a bent chain of narrow, overlapping lobes plus carved
+ * inlets and peninsulas. There is no giant central ellipse. A strongly irregular outer envelope is
+ * used only as a safety cap, so the 500-3000 block contract survives without forcing round coasts.</p>
  */
 public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFunction {
     public static final KeyDispatchDataCodec<StrategicMacroMask> CODEC =
             KeyDispatchDataCodec.of(MapCodec.unit(new StrategicMacroMask(0L)));
 
-    private static final double CELL_SPACING_X = 3_250.0;
-    private static final double CELL_SPACING_Z = 2_815.0;
-    private static final double CENTER_JITTER = 1_200.0;
+    // Denser candidate spacing is required now that ~1k islands are the norm. Correlated inactive
+    // cells still create genuine 500-1200+ block open-water gaps between strategic clusters.
+    private static final double CELL_SPACING_X = 1_250.0;
+    private static final double CELL_SPACING_Z = 1_083.0; // ~sqrt(3)/2 * 1250
+    private static final double CENTER_JITTER = 390.0;
 
     private static final double MIN_DIAMETER = 500.0;
     private static final double MAX_DIAMETER = 3_000.0;
-    private static final double OCEAN_HALF_GAP = 155.0;
+    private static final double OCEAN_HALF_GAP = 105.0;
 
-    // Only the low tail becomes empty strategic ocean. Correlation creates broad gaps without
-    // sacrificing the ~30-35% land-share neighborhood that already tested well in game.
-    private static final double ACTIVITY_THRESHOLD = -0.45;
-    private static final double ACTIVITY_MACRO_WEIGHT = 0.50;
-    private static final double ACTIVITY_LOCAL_WEIGHT = 0.50;
-    private static final double ACTIVITY_SCALE = 2.10;
+    private static final double ACTIVITY_THRESHOLD = -0.42;
+    private static final double ACTIVITY_MACRO_WEIGHT = 0.55;
+    private static final double ACTIVITY_LOCAL_WEIGHT = 0.45;
+    private static final double ACTIVITY_SCALE = 2.35;
 
     private static final double LAND_THRESHOLD = -0.19;
     private static final double MIN_OUTPUT = -1.20;
@@ -52,18 +50,20 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     public static double sample(long seed, double x, double z) {
         long roughRow = fastFloor(z / CELL_SPACING_Z);
 
-        double nearestDistance = Double.POSITIVE_INFINITY;
-        double secondDistance = Double.POSITIVE_INFINITY;
+        // Compare squared distances inside the candidate loop. The old implementation performed a
+        // sqrt for every candidate; this performs only two after the nearest sites are known.
+        double nearestDistanceSq = Double.POSITIVE_INFINITY;
+        double secondDistanceSq = Double.POSITIVE_INFINITY;
         long nearestColumn = 0L;
         long nearestRow = 0L;
         double nearestCenterX = 0.0;
         double nearestCenterZ = 0.0;
 
-        for (long row = roughRow - 4; row <= roughRow + 4; row++) {
+        for (long row = roughRow - 3; row <= roughRow + 3; row++) {
             double rowOffset = ((row & 1L) == 0L) ? 0.0 : CELL_SPACING_X * 0.5;
             long roughColumn = fastFloor((x - rowOffset) / CELL_SPACING_X);
 
-            for (long column = roughColumn - 4; column <= roughColumn + 4; column++) {
+            for (long column = roughColumn - 3; column <= roughColumn + 3; column++) {
                 if (!isRegionActive(seed, column, row)) {
                     continue;
                 }
@@ -75,24 +75,29 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
 
                 double dx = x - centerX;
                 double dz = z - centerZ;
-                double distance = Math.sqrt(dx * dx + dz * dz);
+                double distanceSq = dx * dx + dz * dz;
 
-                if (distance < nearestDistance) {
-                    secondDistance = nearestDistance;
-                    nearestDistance = distance;
+                if (distanceSq < nearestDistanceSq) {
+                    secondDistanceSq = nearestDistanceSq;
+                    nearestDistanceSq = distanceSq;
                     nearestColumn = column;
                     nearestRow = row;
                     nearestCenterX = centerX;
                     nearestCenterZ = centerZ;
-                } else if (distance < secondDistance) {
-                    secondDistance = distance;
+                } else if (distanceSq < secondDistanceSq) {
+                    secondDistanceSq = distanceSq;
                 }
             }
         }
 
-        if (!Double.isFinite(nearestDistance)) {
+        if (!Double.isFinite(nearestDistanceSq)) {
             return MIN_OUTPUT;
         }
+
+        double nearestDistance = Math.sqrt(nearestDistanceSq);
+        double secondDistance = Double.isFinite(secondDistanceSq)
+                ? Math.sqrt(secondDistanceSq)
+                : Double.POSITIVE_INFINITY;
 
         double diameter = chooseDiameter(seed, nearestColumn, nearestRow);
         double hardRadius = diameter * 0.5;
@@ -107,140 +112,171 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double localX = dx * cosR + dz * sinR;
         double localZ = -dx * sinR + dz * cosR;
 
-        double warpScale = Math.max(120.0, hardRadius * 0.28);
-        double warpAmplitude = Math.max(16.0, Math.min(105.0, hardRadius * 0.085));
+        // Coherent domain warp bends the whole landform instead of simply roughening a circle.
+        double warpScale = Math.max(85.0, hardRadius * 0.31);
+        double warpAmplitude = Math.max(14.0, Math.min(78.0, hardRadius * 0.10));
         double warpedX = localX + valueNoise(
-                seed,
-                x / warpScale,
-                z / warpScale,
-                0x243F6A8885A308D3L
+                seed, x / warpScale, z / warpScale, 0x243F6A8885A308D3L
         ) * warpAmplitude;
         double warpedZ = localZ + valueNoise(
-                seed,
-                x / warpScale,
-                z / warpScale,
-                0x13198A2E03707344L
+                seed, x / warpScale, z / warpScale, 0x13198A2E03707344L
         ) * warpAmplitude;
 
-        double activity = regionActivity(seed, nearestColumn, nearestRow);
-        double mainAspect = lerp(
-                0.48,
-                0.66,
-                unitHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL)
-        );
-        if (activity > 0.30) {
-            mainAspect *= 0.95;
-        }
-
-        double shape = ellipseSignedDistance(
-                warpedX,
-                warpedZ,
-                hardRadius * 0.68,
-                hardRadius * mainAspect,
-                signedHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL) * 0.70
-        );
-
-        shape = Math.max(shape, regionalLobe(
+        // No central potato. Three overlapping, differently rotated narrow lobes create a bent
+        // connected spine. Their offsets/radii vary independently per strategic region.
+        double shape = regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x3F84D5B5B5470917L,
-                -0.40, 0.10, 0.48, 0.29
-        ));
+                -0.30, -0.03, 0.43, 0.20
+        );
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x9216D5D98979FB1BL,
-                0.39, -0.12, 0.47, 0.28
+                0.00, 0.08, 0.39, 0.24
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xD1310BA698DFB5ACL,
-                0.02, 0.39, 0.33, 0.20
-        ));
-        shape = Math.max(shape, regionalLobe(
-                seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
-                0xB8E1AFED6A267E96L,
-                0.12, -0.39, 0.32, 0.19
-        ));
-        shape = Math.max(shape, regionalLobe(
-                seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
-                0xBA7C9045F12C7F99L,
-                -0.17, 0.25, 0.26, 0.16
+                0.31, -0.08, 0.38, 0.18
         ));
 
-        if (diameter >= 1_500.0) {
+        // Most regions get one asymmetric side mass. This is what creates hooks, broad bays and
+        // one-sided silhouettes rather than the old bilateral oval look.
+        if (unitHash(seed, nearestColumn, nearestRow, 0xB8E1AFED6A267E96L) < 0.78) {
+            double side = unitHash(seed, nearestColumn, nearestRow, 0xBA7C9045F12C7F99L) < 0.5
+                    ? -1.0 : 1.0;
+            shape = Math.max(shape, regionalLobe(
+                    seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
+                    0xBA7C9045F12C7F99L,
+                    signedHash(seed, nearestColumn, nearestRow, 0xC13FA9A902A6328FL) * 0.12,
+                    side * 0.34,
+                    0.29,
+                    0.13
+            ));
+        }
+
+        // Narrow terminal peninsula. Even ~1k islands can have one; large islands are not the only
+        // interesting silhouettes anymore.
+        if (diameter >= 720.0
+                && unitHash(seed, nearestColumn, nearestRow, 0x24A19947B3916CF7L) < 0.72) {
             long salt = 0x24A19947B3916CF7L;
-            double side = unitHash(seed, nearestColumn, nearestRow, salt) < 0.5 ? -1.0 : 1.0;
-            double peninsulaAngle = (side < 0.0 ? Math.PI : 0.0)
-                    + signedHash(seed, nearestColumn, nearestRow, salt ^ 0x55L) * 0.55;
-            double offset = hardRadius * 0.61;
-            double peninsulaX = Math.cos(peninsulaAngle) * offset;
-            double peninsulaZ = Math.sin(peninsulaAngle) * offset;
+            double side = unitHash(seed, nearestColumn, nearestRow, salt ^ 0x44L) < 0.5 ? -1.0 : 1.0;
+            double peninsulaX = side * hardRadius * lerp(
+                    0.53, 0.66, unitHash(seed, nearestColumn, nearestRow, salt ^ 0x55L)
+            );
+            double peninsulaZ = hardRadius * signedHash(
+                    seed, nearestColumn, nearestRow, salt ^ 0x66L
+            ) * 0.24;
             shape = Math.max(shape, ellipseSignedDistance(
                     warpedX - peninsulaX,
                     warpedZ - peninsulaZ,
-                    hardRadius * 0.32,
-                    hardRadius * 0.13,
-                    signedHash(seed, nearestColumn, nearestRow, salt ^ 0x66L) * 0.95
+                    hardRadius * lerp(0.22, 0.31,
+                            unitHash(seed, nearestColumn, nearestRow, salt ^ 0x77L)),
+                    hardRadius * lerp(0.065, 0.12,
+                            unitHash(seed, nearestColumn, nearestRow, salt ^ 0x88L)),
+                    signedHash(seed, nearestColumn, nearestRow, salt ^ 0x99L) * 1.30
             ));
         }
 
-        if (diameter >= 1_800.0) {
-            double satelliteBoost = activity > 0.20 ? 0.14 : 0.0;
-            shape = Math.max(shape, satelliteIsland(
-                    seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
-                    0x0801F2E2858EFC16L,
-                    0.58 + satelliteBoost
-            ));
-            shape = Math.max(shape, satelliteIsland(
-                    seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
-                    0xA5A3564E27F8862BL,
-                    0.25 + satelliteBoost
-            ));
+        // Carve long, narrow inlets from the edge. These produce concavity/straits without the
+        // circular Pac-Man bites from the earlier prototype.
+        if (diameter >= 780.0) {
+            shape = carveInlet(
+                    shape, seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
+                    0xA5A3564E27F8862BL, 0.74
+            );
+        }
+        if (diameter >= 1_150.0) {
+            shape = carveInlet(
+                    shape, seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
+                    0x0801F2E2858EFC16L, 0.34
+            );
         }
 
-        double coastScale = Math.max(70.0, hardRadius * 0.14);
-        double coastAmplitude = Math.max(8.0, Math.min(55.0, hardRadius * 0.060));
+        // Fine coastline roughness after macro morphology is established.
+        double coastScale = Math.max(48.0, hardRadius * 0.15);
+        double coastAmplitude = Math.max(7.0, Math.min(42.0, hardRadius * 0.055));
         shape += valueNoise(
-                seed,
-                x / coastScale,
-                z / coastScale,
-                0x636920D871574E69L
+                seed, x / coastScale, z / coastScale, 0x636920D871574E69L
         ) * coastAmplitude;
 
-        shape += hardRadius * 0.14;
-
-        // Hard maximum is now an elongated, rotated, softly warped envelope rather than a circle.
-        // Its long axis stays below the selected 500-3000 block contract.
-        double capAspect = lerp(
-                0.70,
-                0.95,
-                unitHash(seed, nearestColumn, nearestRow, 0xA458FEA3F4933D7EL)
+        // Irregular safety envelope only. The visible shape normally stays inside this boundary;
+        // it exists to guarantee the requested maximum size, not to define the coastline.
+        double cap = irregularHardCap(
+                seed, nearestColumn, nearestRow, localX, localZ, hardRadius
         );
-        double capRotation = signedHash(seed, nearestColumn, nearestRow, 0x8F1BBCDCB7A56463L) * 0.55;
-        double cap = ellipseSignedDistance(
-                localX,
-                localZ,
-                hardRadius * 0.97,
-                hardRadius * capAspect,
-                capRotation
-        );
-        double capNoiseScale = Math.max(180.0, hardRadius * 0.50);
-        double capNoiseAmplitude = Math.min(36.0, hardRadius * 0.030);
-        cap += valueNoise(
-                seed,
-                x / capNoiseScale,
-                z / capNoiseScale,
-                0xE49B69C19EF14AD2L
-        ) * capNoiseAmplitude;
         shape = Math.min(shape, cap);
 
+        // Voronoi separation guarantees water between neighboring strategic regions even when
+        // jitter places their centers unusually close together.
         double corridorSignedDistance = Double.isFinite(secondDistance)
                 ? (secondDistance - nearestDistance) * 0.5 - OCEAN_HALF_GAP
                 : Double.POSITIVE_INFINITY;
         double signedDistance = Math.min(shape, corridorSignedDistance);
 
-        double coastFeather = Math.max(50.0, Math.min(145.0, hardRadius * 0.11));
+        double coastFeather = Math.max(42.0, Math.min(115.0, hardRadius * 0.13));
         double value = LAND_THRESHOLD + (signedDistance / coastFeather) * 0.55;
         return Math.max(MIN_OUTPUT, Math.min(MAX_OUTPUT, value));
+    }
+
+    private static double carveInlet(
+            double shape,
+            long seed,
+            long column,
+            long row,
+            double x,
+            double z,
+            double hardRadius,
+            long salt,
+            double chance
+    ) {
+        if (unitHash(seed, column, row, salt ^ 0x111L) >= chance) {
+            return shape;
+        }
+
+        double angle = unitHash(seed, column, row, salt) * Math.PI * 2.0;
+        double offset = hardRadius * lerp(
+                0.52, 0.68, unitHash(seed, column, row, salt ^ 0x222L)
+        );
+        double centerX = Math.cos(angle) * offset;
+        double centerZ = Math.sin(angle) * offset;
+
+        double cut = ellipseSignedDistance(
+                x - centerX,
+                z - centerZ,
+                hardRadius * lerp(0.22, 0.34,
+                        unitHash(seed, column, row, salt ^ 0x333L)),
+                hardRadius * lerp(0.045, 0.095,
+                        unitHash(seed, column, row, salt ^ 0x444L)),
+                -angle + signedHash(seed, column, row, salt ^ 0x555L) * 0.35
+        );
+
+        // SDF subtraction: positive cut values become water, while the narrow cut's long axis makes
+        // an inlet/channel rather than a circular bite.
+        return Math.min(shape, -cut);
+    }
+
+    private static double irregularHardCap(
+            long seed,
+            long column,
+            long row,
+            double x,
+            double z,
+            double hardRadius
+    ) {
+        double angle = Math.atan2(z, x);
+        double distance = Math.sqrt(x * x + z * z);
+
+        double phase2 = unitHash(seed, column, row, 0xA458FEA3F4933D7EL) * Math.PI * 2.0;
+        double phase3 = unitHash(seed, column, row, 0x8F1BBCDCB7A56463L) * Math.PI * 2.0;
+        double phase5 = unitHash(seed, column, row, 0x9E3779B97F4A7C15L) * Math.PI * 2.0;
+
+        double radiusFactor = 0.84
+                + 0.095 * Math.sin(angle * 2.0 + phase2)
+                + 0.070 * Math.sin(angle * 3.0 + phase3)
+                + 0.040 * Math.sin(angle * 5.0 + phase5);
+        radiusFactor = Math.max(0.62, Math.min(0.99, radiusFactor));
+        return hardRadius * radiusFactor - distance;
     }
 
     private static boolean isRegionActive(long seed, long column, long row) {
@@ -272,72 +308,21 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
             double baseRadiusZ
     ) {
         double offsetX = hardRadius * (baseOffsetX
-                + signedHash(seed, column, row, salt) * 0.12);
+                + signedHash(seed, column, row, salt) * 0.11);
         double offsetZ = hardRadius * (baseOffsetZ
-                + signedHash(seed, column, row, salt ^ 0x111L) * 0.13);
+                + signedHash(seed, column, row, salt ^ 0x111L) * 0.12);
         double radiusX = hardRadius * baseRadiusX * lerp(
-                0.78,
-                1.20,
-                unitHash(seed, column, row, salt ^ 0x222L)
+                0.78, 1.18, unitHash(seed, column, row, salt ^ 0x222L)
         );
         double radiusZ = hardRadius * baseRadiusZ * lerp(
-                0.76,
-                1.18,
-                unitHash(seed, column, row, salt ^ 0x333L)
+                0.72, 1.22, unitHash(seed, column, row, salt ^ 0x333L)
         );
-        double rotation = signedHash(seed, column, row, salt ^ 0x444L) * 1.10;
+        double rotation = signedHash(seed, column, row, salt ^ 0x444L) * 1.35;
         return ellipseSignedDistance(
                 x - offsetX,
                 z - offsetZ,
                 radiusX,
                 radiusZ,
-                rotation
-        );
-    }
-
-    private static double satelliteIsland(
-            long seed,
-            long column,
-            long row,
-            double x,
-            double z,
-            double hardRadius,
-            long salt,
-            double chance
-    ) {
-        if (unitHash(seed, column, row, salt ^ 0x999L) >= chance) {
-            return Double.NEGATIVE_INFINITY;
-        }
-
-        double angle = unitHash(seed, column, row, salt) * Math.PI * 2.0;
-        double offset = hardRadius * lerp(
-                0.68,
-                0.80,
-                unitHash(seed, column, row, salt ^ 0x123L)
-        );
-        double centerX = Math.cos(angle) * offset;
-        double centerZ = Math.sin(angle) * offset;
-
-        double satelliteLongRadius = Math.max(
-                250.0,
-                Math.min(350.0, hardRadius * lerp(
-                        0.18,
-                        0.23,
-                        unitHash(seed, column, row, salt ^ 0x456L)
-                ))
-        );
-        double satelliteShortRadius = satelliteLongRadius * lerp(
-                0.58,
-                0.86,
-                unitHash(seed, column, row, salt ^ 0x789L)
-        );
-        double rotation = signedHash(seed, column, row, salt ^ 0xABCL) * 1.20;
-
-        return ellipseSignedDistance(
-                x - centerX,
-                z - centerZ,
-                satelliteLongRadius,
-                satelliteShortRadius,
                 rotation
         );
     }
@@ -361,34 +346,30 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     }
 
     /**
-     * Preserve the successful broad size distribution, but let high-activity cluster cores bias
-     * toward major 2-3k mainlands. Fringe cells still supply the full 500-1600 island range.
+     * Canonical strategic size distribution:
+     * 15% 500-750, 55% 750-1150, 20% 1150-1500, 7% 1500-1900,
+     * 2.5% 1900-2400, and only 0.5% 2400-3000.
      */
     private static double chooseDiameter(long seed, long column, long row) {
-        double activity = regionActivity(seed, column, row);
         double bucket = unitHash(seed, column, row, 0xCBBB9D5DC1059ED8L);
         double within = unitHash(seed, column, row, 0x629A292A367CD507L);
 
-        if (activity > 0.30) {
-            return lerp(2_600.0, MAX_DIAMETER, within);
+        if (bucket < 0.15) {
+            return lerp(MIN_DIAMETER, 750.0, within);
         }
-        if (activity > 0.10 && bucket < 0.55) {
-            return lerp(2_200.0, 2_850.0, within);
+        if (bucket < 0.70) {
+            return lerp(750.0, 1_150.0, within);
         }
-
-        if (bucket < 0.07) {
-            return lerp(MIN_DIAMETER, 900.0, within);
+        if (bucket < 0.90) {
+            return lerp(1_150.0, 1_500.0, within);
         }
-        if (bucket < 0.19) {
-            return lerp(900.0, 1_600.0, within);
+        if (bucket < 0.97) {
+            return lerp(1_500.0, 1_900.0, within);
         }
-        if (bucket < 0.46) {
-            return lerp(1_600.0, 2_200.0, within);
+        if (bucket < 0.995) {
+            return lerp(1_900.0, 2_400.0, within);
         }
-        if (bucket < 0.78) {
-            return lerp(2_200.0, 2_700.0, within);
-        }
-        return lerp(2_700.0, MAX_DIAMETER, within);
+        return lerp(2_400.0, MAX_DIAMETER, within);
     }
 
     @Override

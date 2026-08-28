@@ -110,10 +110,10 @@ dependencies {
     implementation fg.deobf("curse.maven:tectonic-686836:${tectonic_file_id}")
     implementation fg.deobf("curse.maven:continents-682515:${continents_file_id}")
 
-    // Low-risk performance stack: reduce memory pressure and general Forge/Minecraft overhead without
-    // replacing the renderer. These are the default profile on Apple Silicon too.
+    // Low-risk performance stack. None of these replaces Create/Flywheel's renderer.
     runtimeOnly fg.deobf("curse.maven:ferritecore-429235:${ferritecore_file_id}")
     runtimeOnly fg.deobf("curse.maven:modernfix-790626:${modernfix_file_id}")
+    runtimeOnly fg.deobf("maven.modrinth:5ZwdcRci:${immediatelyfast_version}")
 
     // Fullscreen terrain map for worldgen iteration. Disable for clean FPS A/B tests with
     // -PfoundryJourneyMap=false, because live mapping itself costs CPU/GPU/chunk I/O.

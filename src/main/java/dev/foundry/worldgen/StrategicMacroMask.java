@@ -29,9 +29,9 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     private static final double MAX_DIAMETER = 3_000.0;
     private static final double OCEAN_HALF_GAP = 155.0;
 
-    // Correlated activation is the hierarchy layer: low regions become open sea, while high regions
-    // preferentially host larger mainlands and surrounding lower-score cells become smaller islands.
-    private static final double ACTIVITY_THRESHOLD = -0.25;
+    // Only the low tail becomes empty strategic ocean. Correlation creates broad gaps without
+    // sacrificing the ~30-35% land-share neighborhood that already tested well in game.
+    private static final double ACTIVITY_THRESHOLD = -0.45;
     private static final double ACTIVITY_MACRO_WEIGHT = 0.50;
     private static final double ACTIVITY_LOCAL_WEIGHT = 0.50;
     private static final double ACTIVITY_SCALE = 2.10;
@@ -59,9 +59,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double nearestCenterX = 0.0;
         double nearestCenterZ = 0.0;
 
-        // Inactive candidates are skipped entirely. This is what creates broad ocean basins and
-        // breaks the old one-island-per-cell rhythm. A 9x9 neighborhood is still a bounded, cheap
-        // search and overwhelmingly contains multiple active regions at the chosen threshold.
         for (long row = roughRow - 4; row <= roughRow + 4; row++) {
             double rowOffset = ((row & 1L) == 0L) ? 0.0 : CELL_SPACING_X * 0.5;
             long roughColumn = fastFloor((x - rowOffset) / CELL_SPACING_X);
@@ -93,8 +90,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
             }
         }
 
-        // A very low activity basin can contain no candidate in the bounded search window. That is
-        // intentional: it is simply deep strategic ocean, not a reason to synthesize another island.
         if (!Double.isFinite(nearestDistance)) {
             return MIN_OUTPUT;
         }
@@ -112,8 +107,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double localX = dx * cosR + dz * sinR;
         double localZ = -dx * sinR + dz * cosR;
 
-        // Coherent low-frequency coordinate warp bends the whole landform instead of merely adding
-        // noise to an otherwise circular edge.
         double warpScale = Math.max(120.0, hardRadius * 0.28);
         double warpAmplitude = Math.max(16.0, Math.min(105.0, hardRadius * 0.085));
         double warpedX = localX + valueNoise(
@@ -129,52 +122,48 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
                 0x13198A2E03707344L
         ) * warpAmplitude;
 
-        // The central body is deliberately anisotropic. High-activity mainlands tend to be longer;
-        // small fringe islands stay more compact.
         double activity = regionActivity(seed, nearestColumn, nearestRow);
         double mainAspect = lerp(
-                0.42,
-                0.62,
+                0.48,
+                0.66,
                 unitHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL)
         );
         if (activity > 0.30) {
-            mainAspect *= 0.90;
+            mainAspect *= 0.95;
         }
 
         double shape = ellipseSignedDistance(
                 warpedX,
                 warpedZ,
-                hardRadius * 0.66,
+                hardRadius * 0.68,
                 hardRadius * mainAspect,
                 signedHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL) * 0.70
         );
 
-        // Curved overlapping spine. Different offsets/radii produce capes and necks without using
-        // circular subtraction masks.
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x3F84D5B5B5470917L,
-                -0.40, 0.10, 0.46, 0.27
+                -0.40, 0.10, 0.48, 0.29
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x9216D5D98979FB1BL,
-                0.39, -0.12, 0.45, 0.26
+                0.39, -0.12, 0.47, 0.28
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xD1310BA698DFB5ACL,
-                0.02, 0.39, 0.31, 0.18
+                0.02, 0.39, 0.33, 0.20
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xB8E1AFED6A267E96L,
-                0.12, -0.39, 0.30, 0.17
+                0.12, -0.39, 0.32, 0.19
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xBA7C9045F12C7F99L,
-                -0.17, 0.25, 0.24, 0.14
+                -0.17, 0.25, 0.26, 0.16
         ));
 
         if (diameter >= 1_500.0) {
@@ -194,8 +183,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
             ));
         }
 
-        // Larger high-activity mainlands preferentially receive nearby detached islands, which
-        // makes archipelagos cluster around strategic centers instead of appearing uniformly.
         if (diameter >= 1_800.0) {
             double satelliteBoost = activity > 0.20 ? 0.14 : 0.0;
             shape = Math.max(shape, satelliteIsland(
@@ -219,27 +206,25 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
                 0x636920D871574E69L
         ) * coastAmplitude;
 
-        // Enough expansion to keep useful land area, but the outer cap below is no longer radial.
-        shape += hardRadius * 0.11;
+        shape += hardRadius * 0.14;
 
-        // Non-radial hard envelope. The long axis stays below the selected diameter contract while
-        // a seeded short axis, rotation and low-frequency edge warp avoid the circular cookie-cutter
-        // silhouette that the previous radial cap imposed.
+        // Hard maximum is now an elongated, rotated, softly warped envelope rather than a circle.
+        // Its long axis stays below the selected 500-3000 block contract.
         double capAspect = lerp(
-                0.58,
-                0.88,
+                0.70,
+                0.95,
                 unitHash(seed, nearestColumn, nearestRow, 0xA458FEA3F4933D7EL)
         );
         double capRotation = signedHash(seed, nearestColumn, nearestRow, 0x8F1BBCDCB7A56463L) * 0.55;
         double cap = ellipseSignedDistance(
                 localX,
                 localZ,
-                hardRadius * 0.94,
+                hardRadius * 0.97,
                 hardRadius * capAspect,
                 capRotation
         );
         double capNoiseScale = Math.max(180.0, hardRadius * 0.50);
-        double capNoiseAmplitude = Math.min(42.0, hardRadius * 0.040);
+        double capNoiseAmplitude = Math.min(36.0, hardRadius * 0.030);
         cap += valueNoise(
                 seed,
                 x / capNoiseScale,
@@ -248,8 +233,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         ) * capNoiseAmplitude;
         shape = Math.min(shape, cap);
 
-        // Voronoi retreat guarantees sea between active strategic regions without prescribing the
-        // coastline itself. Inactive cells do not participate, so low-activity basins stay broad.
         double corridorSignedDistance = Double.isFinite(secondDistance)
                 ? (secondDistance - nearestDistance) * 0.5 - OCEAN_HALF_GAP
                 : Double.POSITIVE_INFINITY;
@@ -378,26 +361,34 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     }
 
     /**
-     * Size is correlated with the activity field. Cluster cores become major mainlands, their
-     * fringes become medium/small islands, and the low tail falls below ACTIVITY_THRESHOLD entirely.
+     * Preserve the successful broad size distribution, but let high-activity cluster cores bias
+     * toward major 2-3k mainlands. Fringe cells still supply the full 500-1600 island range.
      */
     private static double chooseDiameter(long seed, long column, long row) {
         double activity = regionActivity(seed, column, row);
+        double bucket = unitHash(seed, column, row, 0xCBBB9D5DC1059ED8L);
         double within = unitHash(seed, column, row, 0x629A292A367CD507L);
 
-        if (activity < -0.10) {
-            return lerp(MIN_DIAMETER, 1_100.0, within);
+        if (activity > 0.30) {
+            return lerp(2_600.0, MAX_DIAMETER, within);
         }
-        if (activity < 0.04) {
+        if (activity > 0.10 && bucket < 0.55) {
+            return lerp(2_200.0, 2_850.0, within);
+        }
+
+        if (bucket < 0.07) {
+            return lerp(MIN_DIAMETER, 900.0, within);
+        }
+        if (bucket < 0.19) {
             return lerp(900.0, 1_600.0, within);
         }
-        if (activity < 0.18) {
-            return lerp(1_500.0, 2_200.0, within);
+        if (bucket < 0.46) {
+            return lerp(1_600.0, 2_200.0, within);
         }
-        if (activity < 0.38) {
-            return lerp(2_100.0, 2_700.0, within);
+        if (bucket < 0.78) {
+            return lerp(2_200.0, 2_700.0, within);
         }
-        return lerp(2_600.0, MAX_DIAMETER, within);
+        return lerp(2_700.0, MAX_DIAMETER, within);
     }
 
     @Override

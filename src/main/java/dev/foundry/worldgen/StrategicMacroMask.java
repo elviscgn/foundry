@@ -7,11 +7,15 @@ import net.minecraft.world.level.levelgen.DensityFunction;
 /**
  * Seeded strategic-scale geography envelope for Tiger Ascent.
  *
- * <p>Foundry owns strategic landmass scale/separation while Tectonic owns terrain character. A
- * strategic region is not a radial blob: it is assembled from a seeded curved chain of overlapping
- * rotated ellipses, narrow peninsula lobes, optional detached satellite islands and coordinate
- * warping. A separate hard envelope and Voronoi sea corridor preserve the 500-3000 block gameplay
- * contract regardless of the visible coastline.</p>
+ * <p>Foundry owns strategic landmass scale/separation while Tectonic owns physical terrain
+ * character. Strategic regions are not generated one-per-cell: a correlated activity field creates
+ * clusters of large mainlands, medium/small fringe islands, and genuine open-ocean basins. Each
+ * active region is then assembled from overlapping rotated lobes, peninsulas, optional satellites
+ * and coordinate warping.</p>
+ *
+ * <p>The hidden lattice is only a bounded candidate-search structure. Correlated activation,
+ * heavy center jitter and a non-radial hard envelope prevent that scaffold from becoming visible in
+ * the coastline. Substantial islands remain roughly 500-3000 blocks across.</p>
  */
 public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFunction {
     public static final KeyDispatchDataCodec<StrategicMacroMask> CODEC =
@@ -24,6 +28,13 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     private static final double MIN_DIAMETER = 500.0;
     private static final double MAX_DIAMETER = 3_000.0;
     private static final double OCEAN_HALF_GAP = 155.0;
+
+    // Correlated activation is the hierarchy layer: low regions become open sea, while high regions
+    // preferentially host larger mainlands and surrounding lower-score cells become smaller islands.
+    private static final double ACTIVITY_THRESHOLD = -0.25;
+    private static final double ACTIVITY_MACRO_WEIGHT = 0.50;
+    private static final double ACTIVITY_LOCAL_WEIGHT = 0.50;
+    private static final double ACTIVITY_SCALE = 2.10;
 
     private static final double LAND_THRESHOLD = -0.19;
     private static final double MIN_OUTPUT = -1.20;
@@ -38,7 +49,6 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         return sample(seed, context.blockX(), context.blockZ());
     }
 
-    /** Shared horizontal sampler used by the physical ocean-floor clamp. */
     public static double sample(long seed, double x, double z) {
         long roughRow = fastFloor(z / CELL_SPACING_Z);
 
@@ -49,13 +59,18 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double nearestCenterX = 0.0;
         double nearestCenterZ = 0.0;
 
-        // Heavy jitter deliberately destroys any visible hex-grid rhythm. ±4 keeps nearest-site
-        // selection correct even when adjacent centers wander strongly toward one another.
+        // Inactive candidates are skipped entirely. This is what creates broad ocean basins and
+        // breaks the old one-island-per-cell rhythm. A 9x9 neighborhood is still a bounded, cheap
+        // search and overwhelmingly contains multiple active regions at the chosen threshold.
         for (long row = roughRow - 4; row <= roughRow + 4; row++) {
             double rowOffset = ((row & 1L) == 0L) ? 0.0 : CELL_SPACING_X * 0.5;
             long roughColumn = fastFloor((x - rowOffset) / CELL_SPACING_X);
 
             for (long column = roughColumn - 4; column <= roughColumn + 4; column++) {
+                if (!isRegionActive(seed, column, row)) {
+                    continue;
+                }
+
                 double centerX = column * CELL_SPACING_X + rowOffset
                         + signedHash(seed, column, row, 0x6A09E667F3BCC909L) * CENTER_JITTER;
                 double centerZ = row * CELL_SPACING_Z
@@ -78,6 +93,12 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
             }
         }
 
+        // A very low activity basin can contain no candidate in the bounded search window. That is
+        // intentional: it is simply deep strategic ocean, not a reason to synthesize another island.
+        if (!Double.isFinite(nearestDistance)) {
+            return MIN_OUTPUT;
+        }
+
         double diameter = chooseDiameter(seed, nearestColumn, nearestRow);
         double hardRadius = diameter * 0.5;
 
@@ -91,8 +112,8 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double localX = dx * cosR + dz * sinR;
         double localZ = -dx * sinR + dz * cosR;
 
-        // Low-frequency domain warp bends every component coherently instead of just roughening a
-        // circular edge.
+        // Coherent low-frequency coordinate warp bends the whole landform instead of merely adding
+        // noise to an otherwise circular edge.
         double warpScale = Math.max(120.0, hardRadius * 0.28);
         double warpAmplitude = Math.max(16.0, Math.min(105.0, hardRadius * 0.085));
         double warpedX = localX + valueNoise(
@@ -108,77 +129,87 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
                 0x13198A2E03707344L
         ) * warpAmplitude;
 
-        // Elongated central mass.
+        // The central body is deliberately anisotropic. High-activity mainlands tend to be longer;
+        // small fringe islands stay more compact.
+        double activity = regionActivity(seed, nearestColumn, nearestRow);
+        double mainAspect = lerp(
+                0.42,
+                0.62,
+                unitHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL)
+        );
+        if (activity > 0.30) {
+            mainAspect *= 0.90;
+        }
+
         double shape = ellipseSignedDistance(
                 warpedX,
                 warpedZ,
                 hardRadius * 0.66,
-                hardRadius * 0.46,
-                signedHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL) * 0.55
+                hardRadius * mainAspect,
+                signedHash(seed, nearestColumn, nearestRow, 0xC0AC29B7C97C50DDL) * 0.70
         );
 
-        // Curved overlapping spine. Natural bays emerge in the gaps between lobes instead of from
-        // explicit circular subtraction, which avoids the artificial "bite" look.
+        // Curved overlapping spine. Different offsets/radii produce capes and necks without using
+        // circular subtraction masks.
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x3F84D5B5B5470917L,
-                -0.38, 0.08, 0.48, 0.30
+                -0.40, 0.10, 0.46, 0.27
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0x9216D5D98979FB1BL,
-                0.38, -0.10, 0.48, 0.29
+                0.39, -0.12, 0.45, 0.26
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xD1310BA698DFB5ACL,
-                0.03, 0.38, 0.34, 0.21
+                0.02, 0.39, 0.31, 0.18
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xB8E1AFED6A267E96L,
-                0.10, -0.38, 0.32, 0.19
+                0.12, -0.39, 0.30, 0.17
         ));
         shape = Math.max(shape, regionalLobe(
                 seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                 0xBA7C9045F12C7F99L,
-                -0.14, 0.25, 0.26, 0.16
+                -0.17, 0.25, 0.24, 0.14
         ));
 
-        // Large regions sometimes receive a thin terminal peninsula extending the spine.
         if (diameter >= 1_500.0) {
             long salt = 0x24A19947B3916CF7L;
             double side = unitHash(seed, nearestColumn, nearestRow, salt) < 0.5 ? -1.0 : 1.0;
             double peninsulaAngle = (side < 0.0 ? Math.PI : 0.0)
-                    + signedHash(seed, nearestColumn, nearestRow, salt ^ 0x55L) * 0.45;
-            double offset = hardRadius * 0.62;
+                    + signedHash(seed, nearestColumn, nearestRow, salt ^ 0x55L) * 0.55;
+            double offset = hardRadius * 0.61;
             double peninsulaX = Math.cos(peninsulaAngle) * offset;
             double peninsulaZ = Math.sin(peninsulaAngle) * offset;
             shape = Math.max(shape, ellipseSignedDistance(
                     warpedX - peninsulaX,
                     warpedZ - peninsulaZ,
-                    hardRadius * 0.34,
-                    hardRadius * 0.15,
-                    signedHash(seed, nearestColumn, nearestRow, salt ^ 0x66L) * 0.80
+                    hardRadius * 0.32,
+                    hardRadius * 0.13,
+                    signedHash(seed, nearestColumn, nearestRow, salt ^ 0x66L) * 0.95
             ));
         }
 
-        // Medium/large regions can carry one or two detached satellites. Satellite diameters are
-        // held around the user's ~500+ block minimum when the parent envelope is large enough.
+        // Larger high-activity mainlands preferentially receive nearby detached islands, which
+        // makes archipelagos cluster around strategic centers instead of appearing uniformly.
         if (diameter >= 1_800.0) {
+            double satelliteBoost = activity > 0.20 ? 0.14 : 0.0;
             shape = Math.max(shape, satelliteIsland(
                     seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                     0x0801F2E2858EFC16L,
-                    0.67
+                    0.58 + satelliteBoost
             ));
             shape = Math.max(shape, satelliteIsland(
                     seed, nearestColumn, nearestRow, warpedX, warpedZ, hardRadius,
                     0xA5A3564E27F8862BL,
-                    0.36
+                    0.25 + satelliteBoost
             ));
         }
 
-        // Fine coastline irregularity after the large morphology is established.
         double coastScale = Math.max(70.0, hardRadius * 0.14);
         double coastAmplitude = Math.max(8.0, Math.min(55.0, hardRadius * 0.060));
         shape += valueNoise(
@@ -188,27 +219,60 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
                 0x636920D871574E69L
         ) * coastAmplitude;
 
-        // Modest morphological expansion keeps the variable-shape version near the intended
-        // strategic land share without reverting to a single inflated ellipse.
-        shape += hardRadius * 0.14;
+        // Enough expansion to keep useful land area, but the outer cap below is no longer radial.
+        shape += hardRadius * 0.11;
 
-        // Irregular hard envelope: no visible land can exceed its selected 500-3000 block class.
-        double angle = Math.atan2(localZ, localX);
-        double capPhase = unitHash(seed, nearestColumn, nearestRow, 0xA458FEA3F4933D7EL)
-                * Math.PI * 2.0;
-        double capFactor = 0.96
-                + 0.030 * Math.sin(angle * 3.0 + capPhase)
-                + 0.020 * Math.sin(angle * 5.0 - capPhase * 0.7);
-        capFactor = Math.min(1.0, capFactor);
-        shape = Math.min(shape, hardRadius * capFactor - nearestDistance);
+        // Non-radial hard envelope. The long axis stays below the selected diameter contract while
+        // a seeded short axis, rotation and low-frequency edge warp avoid the circular cookie-cutter
+        // silhouette that the previous radial cap imposed.
+        double capAspect = lerp(
+                0.58,
+                0.88,
+                unitHash(seed, nearestColumn, nearestRow, 0xA458FEA3F4933D7EL)
+        );
+        double capRotation = signedHash(seed, nearestColumn, nearestRow, 0x8F1BBCDCB7A56463L) * 0.55;
+        double cap = ellipseSignedDistance(
+                localX,
+                localZ,
+                hardRadius * 0.94,
+                hardRadius * capAspect,
+                capRotation
+        );
+        double capNoiseScale = Math.max(180.0, hardRadius * 0.50);
+        double capNoiseAmplitude = Math.min(42.0, hardRadius * 0.040);
+        cap += valueNoise(
+                seed,
+                x / capNoiseScale,
+                z / capNoiseScale,
+                0xE49B69C19EF14AD2L
+        ) * capNoiseAmplitude;
+        shape = Math.min(shape, cap);
 
-        // Hard sea separation independent of lobe orientation or center jitter.
-        double corridorSignedDistance = (secondDistance - nearestDistance) * 0.5 - OCEAN_HALF_GAP;
+        // Voronoi retreat guarantees sea between active strategic regions without prescribing the
+        // coastline itself. Inactive cells do not participate, so low-activity basins stay broad.
+        double corridorSignedDistance = Double.isFinite(secondDistance)
+                ? (secondDistance - nearestDistance) * 0.5 - OCEAN_HALF_GAP
+                : Double.POSITIVE_INFINITY;
         double signedDistance = Math.min(shape, corridorSignedDistance);
 
         double coastFeather = Math.max(50.0, Math.min(145.0, hardRadius * 0.11));
         double value = LAND_THRESHOLD + (signedDistance / coastFeather) * 0.55;
         return Math.max(MIN_OUTPUT, Math.min(MAX_OUTPUT, value));
+    }
+
+    private static boolean isRegionActive(long seed, long column, long row) {
+        return regionActivity(seed, column, row) > ACTIVITY_THRESHOLD;
+    }
+
+    private static double regionActivity(long seed, long column, long row) {
+        double macro = valueNoise(
+                seed,
+                column / ACTIVITY_SCALE,
+                row / ACTIVITY_SCALE,
+                0xF00DBABE1234ABCDL
+        );
+        double local = signedHash(seed, column, row, 0xD00DFEED99887766L);
+        return macro * ACTIVITY_MACRO_WEIGHT + local * ACTIVITY_LOCAL_WEIGHT;
     }
 
     private static double regionalLobe(
@@ -229,16 +293,16 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double offsetZ = hardRadius * (baseOffsetZ
                 + signedHash(seed, column, row, salt ^ 0x111L) * 0.13);
         double radiusX = hardRadius * baseRadiusX * lerp(
-                0.80,
+                0.78,
                 1.20,
                 unitHash(seed, column, row, salt ^ 0x222L)
         );
         double radiusZ = hardRadius * baseRadiusZ * lerp(
-                0.80,
-                1.20,
+                0.76,
+                1.18,
                 unitHash(seed, column, row, salt ^ 0x333L)
         );
-        double rotation = signedHash(seed, column, row, salt ^ 0x444L);
+        double rotation = signedHash(seed, column, row, salt ^ 0x444L) * 1.10;
         return ellipseSignedDistance(
                 x - offsetX,
                 z - offsetZ,
@@ -265,7 +329,7 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         double angle = unitHash(seed, column, row, salt) * Math.PI * 2.0;
         double offset = hardRadius * lerp(
                 0.68,
-                0.82,
+                0.80,
                 unitHash(seed, column, row, salt ^ 0x123L)
         );
         double centerX = Math.cos(angle) * offset;
@@ -273,18 +337,18 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
 
         double satelliteLongRadius = Math.max(
                 250.0,
-                Math.min(360.0, hardRadius * lerp(
+                Math.min(350.0, hardRadius * lerp(
                         0.18,
-                        0.24,
+                        0.23,
                         unitHash(seed, column, row, salt ^ 0x456L)
                 ))
         );
         double satelliteShortRadius = satelliteLongRadius * lerp(
-                0.65,
-                0.90,
+                0.58,
+                0.86,
                 unitHash(seed, column, row, salt ^ 0x789L)
         );
-        double rotation = signedHash(seed, column, row, salt ^ 0xABCL);
+        double rotation = signedHash(seed, column, row, salt ^ 0xABCL) * 1.20;
 
         return ellipseSignedDistance(
                 x - centerX,
@@ -313,24 +377,27 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
         return (1.0 - normalized) * Math.min(radiusX, radiusZ);
     }
 
-    /** Weighted size distribution: 500 block islands exist; most regions remain state-scale. */
+    /**
+     * Size is correlated with the activity field. Cluster cores become major mainlands, their
+     * fringes become medium/small islands, and the low tail falls below ACTIVITY_THRESHOLD entirely.
+     */
     private static double chooseDiameter(long seed, long column, long row) {
-        double bucket = unitHash(seed, column, row, 0xCBBB9D5DC1059ED8L);
+        double activity = regionActivity(seed, column, row);
         double within = unitHash(seed, column, row, 0x629A292A367CD507L);
 
-        if (bucket < 0.07) {
-            return lerp(MIN_DIAMETER, 900.0, within);
+        if (activity < -0.10) {
+            return lerp(MIN_DIAMETER, 1_100.0, within);
         }
-        if (bucket < 0.19) {
+        if (activity < 0.04) {
             return lerp(900.0, 1_600.0, within);
         }
-        if (bucket < 0.46) {
-            return lerp(1_600.0, 2_200.0, within);
+        if (activity < 0.18) {
+            return lerp(1_500.0, 2_200.0, within);
         }
-        if (bucket < 0.78) {
-            return lerp(2_200.0, 2_700.0, within);
+        if (activity < 0.38) {
+            return lerp(2_100.0, 2_700.0, within);
         }
-        return lerp(2_700.0, MAX_DIAMETER, within);
+        return lerp(2_600.0, MAX_DIAMETER, within);
     }
 
     @Override

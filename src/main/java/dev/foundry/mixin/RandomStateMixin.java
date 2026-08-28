@@ -36,6 +36,11 @@ public abstract class RandomStateMixin {
     private static final double CONTINENTS_COAST_BIAS = 0.12;
     private static final double CONTINENTS_COAST_DETAIL = 0.32;
 
+    // Vanilla reserves approximately -1.20..-1.05 continentalness for Mushroom Fields. Foundry's
+    // strategic ocean previously reached -1.20, so ordinary deep-ocean basins repeatedly entered
+    // the mushroom-island biome/terrain slot. Keep our floor safely inside vanilla deep ocean.
+    private static final double STRATEGIC_DEEP_OCEAN_FLOOR = -1.00;
+
     @Inject(method = "<init>", at = @At("RETURN"))
     private void foundry$clampLiveOverworldRouter(
             NoiseGeneratorSettings settings,
@@ -68,8 +73,14 @@ public abstract class RandomStateMixin {
                 coastSignal
         );
         DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
+
+        DensityFunction carvedStrategicContinents = DensityFunctions.min(strategicMask, detailedMask);
+        DensityFunction mushroomSafeStrategicContinents = DensityFunctions.max(
+                DensityFunctions.constant(STRATEGIC_DEEP_OCEAN_FLOOR),
+                carvedStrategicContinents
+        );
         DensityFunction strategicContinents = DensityFunctions.flatCache(
-                DensityFunctions.cache2d(DensityFunctions.min(strategicMask, detailedMask))
+                DensityFunctions.cache2d(mushroomSafeStrategicContinents)
         );
 
         // Replace every reference to the live continentalness node throughout Tectonic's finished
@@ -110,7 +121,7 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — cached 2D strategic field; Tectonic owns physical terrain (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — cached 2D field; mushroom-safe deep-ocean floor; Tectonic owns physical terrain (seed "
                 + seed + ")");
     }
 }

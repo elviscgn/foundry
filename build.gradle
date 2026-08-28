@@ -17,6 +17,9 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 
+def enableVulkan = (project.findProperty('foundryVulkan') ?: 'false').toString().toBoolean()
+def enableJourneyMap = !(project.findProperty('foundryJourneyMap') ?: 'true').toString().equalsIgnoreCase('false')
+
 minecraft {
     mappings channel: mapping_channel, version: mapping_version
     copyIdeResources = true
@@ -24,8 +27,9 @@ minecraft {
     runs {
         configureEach {
             workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
+            // DEBUG + REGISTRIES logging creates a surprising amount of console I/O on macOS.
+            // Keep normal runs quiet; temporarily restore debug logging only when diagnosing Forge registration.
+            property 'forge.logging.console.level', 'info'
             property 'mixin.env.remapRefMap', 'true'
             property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
             arg '-mixin.config=foundry.mixins.json'
@@ -106,8 +110,22 @@ dependencies {
     implementation fg.deobf("curse.maven:tectonic-686836:${tectonic_file_id}")
     implementation fg.deobf("curse.maven:continents-682515:${continents_file_id}")
 
-    // Fullscreen terrain map for worldgen iteration. Runtime-only: Foundry does not compile against it.
-    runtimeOnly fg.deobf("curse.maven:journeymap-32274:${journeymap_file_id}")
+    // Low-risk performance stack: reduce memory pressure and general Forge/Minecraft overhead without
+    // replacing the renderer. These are the default profile on Apple Silicon too.
+    runtimeOnly fg.deobf("curse.maven:ferritecore-429235:${ferritecore_file_id}")
+    runtimeOnly fg.deobf("curse.maven:modernfix-790626:${modernfix_file_id}")
+
+    // Fullscreen terrain map for worldgen iteration. Disable for clean FPS A/B tests with
+    // -PfoundryJourneyMap=false, because live mapping itself costs CPU/GPU/chunk I/O.
+    if (enableJourneyMap) {
+        runtimeOnly fg.deobf("curse.maven:journeymap-32274:${journeymap_file_id}")
+    }
+
+    // Experimental Apple Silicon A/B renderer profile. VulkanMod uses a completely different renderer;
+    // keep it opt-in because Create/Flywheel/maps can depend on OpenGL-specific behavior.
+    if (enableVulkan) {
+        runtimeOnly fg.deobf("curse.maven:vulkanmod-unofficial-forge-port-1591477:${vulkanmod_file_id}")
+    }
 
     // Blueprint/urban-construction engine available in the dev runtime for Foundry development plots.
     runtimeOnly fg.deobf("curse.maven:structurize-298744:8610456")

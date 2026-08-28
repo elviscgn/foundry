@@ -50,7 +50,14 @@ public abstract class RandomStateMixin {
         }
 
         DensityFunction originalContinents = this.router.continents();
-        DensityFunction strategicMask = new StrategicMacroMask(seed);
+
+        // StrategicMacroMask is purely horizontal but comparatively expensive. Mirror vanilla /
+        // Tectonic's own 2D continentalness pattern and let NoiseChunk cache it across the many Y
+        // samples performed while generating a chunk. This preserves geography exactly while
+        // avoiding repeated strategic-site searches for the same horizontal coordinates.
+        DensityFunction strategicMask = DensityFunctions.flatCache(
+                DensityFunctions.cache2d(new StrategicMacroMask(seed))
+        );
 
         DensityFunction coastSignal = DensityFunctions.add(
                 originalContinents,
@@ -61,7 +68,9 @@ public abstract class RandomStateMixin {
                 coastSignal
         );
         DensityFunction detailedMask = DensityFunctions.add(strategicMask, coastDetail);
-        DensityFunction strategicContinents = DensityFunctions.min(strategicMask, detailedMask);
+        DensityFunction strategicContinents = DensityFunctions.flatCache(
+                DensityFunctions.cache2d(DensityFunctions.min(strategicMask, detailedMask))
+        );
 
         // Replace every reference to the live continentalness node throughout Tectonic's finished
         // router graph. This lets Tectonic's own depth/factor/final-density machinery produce the
@@ -101,7 +110,7 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — Tectonic owns physical terrain (seed "
+        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — cached 2D strategic field; Tectonic owns physical terrain (seed "
                 + seed + ")");
     }
 }

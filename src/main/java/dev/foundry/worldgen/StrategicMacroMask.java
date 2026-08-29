@@ -19,20 +19,22 @@ public record StrategicMacroMask(long seed) implements DensityFunction.SimpleFun
     public static final KeyDispatchDataCodec<StrategicMacroMask> CODEC =
             KeyDispatchDataCodec.of(MapCodec.unit(new StrategicMacroMask(0L)));
 
-    // Denser candidate spacing is required now that ~1k islands are the norm. Correlated inactive
-    // cells still create genuine 500-1200+ block open-water gaps between strategic clusters.
-    private static final double CELL_SPACING_X = 1_250.0;
-    private static final double CELL_SPACING_Z = 1_083.0; // ~sqrt(3)/2 * 1250
-    private static final double CENTER_JITTER = 390.0;
+    // Keep the approved ~1k island scale, but bring neighboring strategic places close enough that
+    // reaching one coast usually reveals another useful destination across a short sea crossing.
+    // Inactive cells still create occasional wider strategic sea lanes; they just no longer cluster
+    // into giant empty basins as often.
+    private static final double CELL_SPACING_X = 1_050.0;
+    private static final double CELL_SPACING_Z = 909.0; // ~sqrt(3)/2 * 1050
+    private static final double CENTER_JITTER = 150.0;
 
     private static final double MIN_DIAMETER = 500.0;
     private static final double MAX_DIAMETER = 3_000.0;
-    private static final double OCEAN_HALF_GAP = 105.0;
+    private static final double OCEAN_HALF_GAP = 35.0;
 
-    private static final double ACTIVITY_THRESHOLD = -0.42;
-    private static final double ACTIVITY_MACRO_WEIGHT = 0.55;
-    private static final double ACTIVITY_LOCAL_WEIGHT = 0.45;
-    private static final double ACTIVITY_SCALE = 2.35;
+    private static final double ACTIVITY_THRESHOLD = -0.50;
+    private static final double ACTIVITY_MACRO_WEIGHT = 0.40;
+    private static final double ACTIVITY_LOCAL_WEIGHT = 0.60;
+    private static final double ACTIVITY_SCALE = 1.80;
 
     private static final double LAND_THRESHOLD = -0.19;
     private static final double MIN_OUTPUT = -1.20;

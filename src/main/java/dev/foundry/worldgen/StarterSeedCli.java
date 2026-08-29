@@ -39,9 +39,9 @@ import java.util.concurrent.CompletableFuture;
  *  2. The best site candidates get a 32-block real-Tectonic physical island raster.
  *  3. Only the best physical candidates pay for the authoritative 16-block raster.
  *
- * Biome is unrestricted. A winner is selected by physical island geometry, nearby land separation,
- * relief, starter-region distance, and coal actually lying on the island. The island does NOT need
- * to contain world spawn; the result prints a ready-to-paste teleport command.
+ * Biome is unrestricted. A winner is selected by physical island geometry, separation from the
+ * nearest meaningful separate landmass, relief, starter-region distance, and coal actually lying
+ * on the island. Tiny offshore rocks are deliberately ignored by the neighbor-gap measurement.
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class StarterSeedCli {
@@ -60,13 +60,15 @@ public final class StarterSeedCli {
     private static final int SITE_ENUMERATION_RADIUS = 5_500;
 
     // Small physical islands normally come from the low end of the strategic diameter distribution.
-    // Keep this intentionally broad because Tectonic/coast carving determines the final land span.
+    // Keep this broad because Tectonic/coast carving determines the final physical land span.
     private static final double MIN_COARSE_NOMINAL_DIAMETER = 500.0;
     private static final double MAX_COARSE_NOMINAL_DIAMETER = 950.0;
     private static final double TARGET_COARSE_NOMINAL_DIAMETER = 575.0;
     private static final int MAX_COARSE_COAL_CENTER_DISTANCE = 500;
 
-    // Radius 704 captures a 420-block island plus a 450-block sea gap with sampling margin.
+    // 704 captures the starter island plus enough surrounding sea/land for the requested gap in the
+    // great majority of cases. Border-touching neighbor components are handled specially below so a
+    // large landmass is not mistaken for a tiny islet merely because only its coast enters the raster.
     private static final int MEDIUM_RADIUS = 704;
     private static final int MEDIUM_STEP = 32;
     private static final int EXACT_RADIUS = 704;
@@ -78,6 +80,13 @@ public final class StarterSeedCli {
     private static final int MIN_NEIGHBOR_GAP = 180;
     private static final int MAX_NEIGHBOR_GAP = 450;
     private static final double MAX_HEIGHT_STD_DEV = 10.0;
+
+    // A separate component must be large enough to matter strategically before it is allowed to
+    // define "neighbor gap". At exact 16-block sampling, 12k sampled blocks is roughly 47 land
+    // samples; at 32-block preview resolution it is roughly 12 samples. A component that reaches
+    // the raster boundary is accepted by span alone because its unseen continuation is truncated.
+    private static final int MIN_MEANINGFUL_NEIGHBOR_SPAN = 160;
+    private static final int MIN_MEANINGFUL_NEIGHBOR_AREA = 12_000;
 
     private static final double TARGET_ISLAND_SPAN = 320.0;
     private static final double TARGET_NEIGHBOR_GAP = 300.0;
@@ -97,13 +106,19 @@ public final class StarterSeedCli {
         System.out.println("[Foundry] Pipeline: exact strategic-site index -> 16 real 32-block island rasters -> 3 exact 16-block finalists.");
         System.out.println(String.format(
                 Locale.ROOT,
-                "[Foundry] FINAL GATES: island %d-%d | neighbor %d-%d | TP distance <= %,d | height SD <= %.1f | coal ON ISLAND | biome unrestricted",
+                "[Foundry] FINAL GATES: island %d-%d | meaningful neighbor %d-%d | TP distance <= %,d | height SD <= %.1f | coal ON ISLAND | biome unrestricted",
                 MIN_ISLAND_SPAN,
                 MAX_ISLAND_SPAN,
                 MIN_NEIGHBOR_GAP,
                 MAX_NEIGHBOR_GAP,
                 MAX_STARTER_DISTANCE,
                 MAX_HEIGHT_STD_DEV
+        ));
+        System.out.println(String.format(
+                Locale.ROOT,
+                "[Foundry] Meaningful neighbor = separate landmass >= %d blocks across and ~%,d+ sampled land blocks; tiny rocks/islets ignored.",
+                MIN_MEANINGFUL_NEIGHBOR_SPAN,
+                MIN_MEANINGFUL_NEIGHBOR_AREA
         ));
         System.out.println("[Foundry] Winner:    run-seed-search/starter-seed-result.txt");
         System.out.println("[Foundry] Near miss: run-seed-search/starter-seed-nearmiss.txt");
@@ -131,7 +146,6 @@ public final class StarterSeedCli {
             long tested = 0L;
             long globalIndex = 0L;
             long startedNanos = System.nanoTime();
-            PhysicalCandidate bestNearMiss = null;
             double bestNearMissScore = Double.POSITIVE_INFINITY;
 
             while (server.isRunning()) {
@@ -257,7 +271,8 @@ public final class StarterSeedCli {
                     );
                     if (exact == null) {
                         System.out.println("[Foundry] exact seed " + preview.seed()
-                                + " had no usable physical island around candidate coordinates "+ preview.tpX() + "," + preview.tpZ() + ".");
+                                + " had no usable physical island around candidate coordinates "
+                                + preview.tpX() + "," + preview.tpZ() + ".");
                         continue;
                     }
 
@@ -269,7 +284,6 @@ public final class StarterSeedCli {
 
                     if (missScore < bestNearMissScore) {
                         bestNearMissScore = missScore;
-                        bestNearMiss = exact;
                         saveNearMiss(exact, tested, startedNanos);
                     }
 
@@ -382,7 +396,7 @@ public final class StarterSeedCli {
             return null;
         }
 
-        int neighborGap = nearestOtherLandGap(land, component, step, radius);
+        NeighborInfo neighbor = nearestMeaningfulNeighbor(land, component, step, radius);
 
         double heightSum = 0.0;
         double heightSqSum = 0.0;
@@ -436,7 +450,9 @@ public final class StarterSeedCli {
                 0.0,
                 component.width(),
                 component.height(),
-                neighborGap,
+                neighbor.gap(),
+                neighbor.span(),
+                neighbor.sampledArea(),
                 starterDistance,
                 heightStdDev,
                 tpX,
@@ -514,9 +530,9 @@ public final class StarterSeedCli {
             failures.add("island span " + span + " > " + MAX_ISLAND_SPAN);
         }
         if (candidate.neighborGap() < MIN_NEIGHBOR_GAP) {
-            failures.add("neighbor gap " + candidate.neighborGap() + " < " + MIN_NEIGHBOR_GAP);
+            failures.add("meaningful neighbor gap " + candidate.neighborGap() + " < " + MIN_NEIGHBOR_GAP);
         } else if (candidate.neighborGap() > MAX_NEIGHBOR_GAP) {
-            failures.add("neighbor gap " + candidate.neighborGap() + " > " + MAX_NEIGHBOR_GAP);
+            failures.add("meaningful neighbor gap " + candidate.neighborGap() + " > " + MAX_NEIGHBOR_GAP);
         }
         if (candidate.starterDistance() > MAX_STARTER_DISTANCE) {
             failures.add("TP point " + candidate.starterDistance() + " from 0,0 > " + MAX_STARTER_DISTANCE);
@@ -539,16 +555,17 @@ public final class StarterSeedCli {
                         + "FOUNDRY STARTER SEED FOUND%n"
                         + "========================================%n"
                         + "Seed: %d%n%n"
-                        + "Starter TP:    /tp @s %d %d %d%n"
+                        + "Starter TP:     /tp @s %d %d %d%n"
                         + "Starter coords: %d, %d, %d%n"
-                        + "Distance 0,0:  %d blocks (spawn-area proxy)%n"
-                        + "Island:        %d x %d%n"
-                        + "Neighbor gap:  %d blocks%n"
-                        + "Height SD:     %.2f%n"
-                        + "Coal:          ON ISLAND at %d, %d%n"
-                        + "Biome:         unrestricted / not scored%n"
-                        + "Seeds tested:  %,d%n"
-                        + "Elapsed:       %.1f seconds%n"
+                        + "Distance 0,0:   %d blocks (spawn-area proxy)%n"
+                        + "Island:         %d x %d%n"
+                        + "Neighbor gap:   %d blocks to meaningful land%n"
+                        + "Neighbor size:  ~%d-block span / ~%,d sampled land blocks%n"
+                        + "Height SD:      %.2f%n"
+                        + "Coal:           ON ISLAND at %d, %d%n"
+                        + "Biome:          unrestricted / not scored%n"
+                        + "Seeds tested:   %,d%n"
+                        + "Elapsed:        %.1f seconds%n"
                         + "========================================%n",
                 candidate.seed(),
                 candidate.tpX(),
@@ -561,6 +578,8 @@ public final class StarterSeedCli {
                 candidate.width(),
                 candidate.height(),
                 candidate.neighborGap(),
+                candidate.neighborSpan(),
+                candidate.neighborSampledArea(),
                 candidate.heightStdDev(),
                 candidate.coalX(),
                 candidate.coalZ(),
@@ -583,7 +602,8 @@ public final class StarterSeedCli {
                         + "Starter TP: /tp @s %d %d %d%n"
                         + "Distance 0,0: %d blocks (spawn-area proxy)%n"
                         + "Island: %d x %d%n"
-                        + "Neighbor gap: %d blocks%n"
+                        + "Meaningful neighbor gap: %d blocks%n"
+                        + "Neighbor size: ~%d-block span / ~%,d sampled land blocks%n"
                         + "Height SD: %.2f%n"
                         + "Coal: %s at %d, %d (distance to island ~%d)%n"
                         + "FAIL: %s%n"
@@ -597,6 +617,8 @@ public final class StarterSeedCli {
                 candidate.width(),
                 candidate.height(),
                 candidate.neighborGap(),
+                candidate.neighborSpan(),
+                candidate.neighborSampledArea(),
                 candidate.heightStdDev(),
                 candidate.coalOnIsland() ? "ON ISLAND" : "OFF ISLAND",
                 candidate.coalX(),
@@ -612,7 +634,7 @@ public final class StarterSeedCli {
     private static String summarize(PhysicalCandidate candidate) {
         return String.format(
                 Locale.ROOT,
-                "seed %d | TP %d,%d,%d | %dx%d | gap %d | dist %.1fk | height SD %.1f | coal %s%s",
+                "seed %d | TP %d,%d,%d | %dx%d | meaningful gap %d -> ~%d span | dist %.1fk | height SD %.1f | coal %s%s",
                 candidate.seed(),
                 candidate.tpX(),
                 candidate.tpY(),
@@ -620,6 +642,7 @@ public final class StarterSeedCli {
                 candidate.width(),
                 candidate.height(),
                 candidate.neighborGap(),
+                candidate.neighborSpan(),
                 candidate.starterDistance() / 1_000.0,
                 candidate.heightStdDev(),
                 candidate.coalOnIsland() ? "ON ISLAND" : "OFF ISLAND",
@@ -636,8 +659,105 @@ public final class StarterSeedCli {
             int anchorX,
             int anchorZ
     ) {
-        int size = land.length;
-        boolean[][] visited = new boolean[size][size];
+        boolean[][] visited = new boolean[land.length][land[0].length];
+        ComponentShape shape = collectComponent(land, startX, startZ, visited);
+        if (shape.cells().isEmpty()) {
+            return null;
+        }
+
+        int centerGridX = (shape.minX() + shape.maxX()) / 2;
+        int centerGridZ = (shape.minZ() + shape.maxZ()) / 2;
+        Cell representative = shape.cells().get(0);
+        int bestRepresentativeSq = Integer.MAX_VALUE;
+        for (Cell cell : shape.cells()) {
+            int ddx = cell.gridX() - centerGridX;
+            int ddz = cell.gridZ() - centerGridZ;
+            int distanceSq = ddx * ddx + ddz * ddz;
+            if (distanceSq < bestRepresentativeSq) {
+                bestRepresentativeSq = distanceSq;
+                representative = cell;
+            }
+        }
+
+        return new LandComponent(
+                shape.cells(),
+                visited,
+                (shape.maxX() - shape.minX() + 1) * step,
+                (shape.maxZ() - shape.minZ() + 1) * step,
+                anchorX - radius + centerGridX * step,
+                anchorZ - radius + centerGridZ * step,
+                representative.gridX(),
+                representative.gridZ()
+        );
+    }
+
+    /**
+     * Finds the nearest separate component that is large enough to represent actual neighboring
+     * geography. This is deliberately component-aware: a single offshore pixel/rock no longer
+     * defines the gap for a 300-block starter island.
+     */
+    private static NeighborInfo nearestMeaningfulNeighbor(
+            boolean[][] land,
+            LandComponent starter,
+            int step,
+            int radius
+    ) {
+        int rows = land.length;
+        int cols = land[0].length;
+        boolean[][] seen = new boolean[rows][cols];
+        for (Cell cell : starter.cells()) {
+            seen[cell.gridZ()][cell.gridX()] = true;
+        }
+
+        int bestGap = Integer.MAX_VALUE;
+        int bestSpan = 0;
+        int bestArea = 0;
+
+        for (int gz = 0; gz < rows; gz++) {
+            for (int gx = 0; gx < cols; gx++) {
+                if (!land[gz][gx] || seen[gz][gx]) {
+                    continue;
+                }
+
+                ComponentShape other = collectComponent(land, gx, gz, seen);
+                int width = (other.maxX() - other.minX() + 1) * step;
+                int height = (other.maxZ() - other.minZ() + 1) * step;
+                int span = Math.max(width, height);
+                int sampledArea = other.cells().size() * step * step;
+                boolean touchesBorder = other.minX() == 0
+                        || other.minZ() == 0
+                        || other.maxX() == cols - 1
+                        || other.maxZ() == rows - 1;
+
+                boolean meaningful = span >= MIN_MEANINGFUL_NEIGHBOR_SPAN
+                        && (sampledArea >= MIN_MEANINGFUL_NEIGHBOR_AREA || touchesBorder);
+                if (!meaningful) {
+                    continue;
+                }
+
+                int gap = componentGap(starter.cells(), other.cells(), step);
+                if (gap < bestGap) {
+                    bestGap = gap;
+                    bestSpan = span;
+                    bestArea = sampledArea;
+                }
+            }
+        }
+
+        if (bestGap == Integer.MAX_VALUE) {
+            return new NeighborInfo(radius * 2, 0, 0);
+        }
+        return new NeighborInfo(bestGap, bestSpan, bestArea);
+    }
+
+    private static ComponentShape collectComponent(
+            boolean[][] land,
+            int startX,
+            int startZ,
+            boolean[][] visited
+    ) {
+        int rows = land.length;
+        int cols = land[0].length;
         ArrayDeque<Cell> queue = new ArrayDeque<>();
         List<Cell> cells = new ArrayList<>();
         queue.add(new Cell(startX, startZ));
@@ -661,7 +781,7 @@ public final class StarterSeedCli {
             for (int direction = 0; direction < 4; direction++) {
                 int nx = cell.gridX() + dx[direction];
                 int nz = cell.gridZ() + dz[direction];
-                if (nx < 0 || nz < 0 || nx >= size || nz >= size) {
+                if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) {
                     continue;
                 }
                 if (!land[nz][nx] || visited[nz][nx]) {
@@ -672,57 +792,20 @@ public final class StarterSeedCli {
             }
         }
 
-        int centerGridX = (minX + maxX) / 2;
-        int centerGridZ = (minZ + maxZ) / 2;
-        Cell representative = cells.get(0);
-        int bestRepresentativeSq = Integer.MAX_VALUE;
-        for (Cell cell : cells) {
-            int ddx = cell.gridX() - centerGridX;
-            int ddz = cell.gridZ() - centerGridZ;
-            int distanceSq = ddx * ddx + ddz * ddz;
-            if (distanceSq < bestRepresentativeSq) {
-                bestRepresentativeSq = distanceSq;
-                representative = cell;
-            }
-        }
-
-        return new LandComponent(
-                cells,
-                visited,
-                (maxX - minX + 1) * step,
-                (maxZ - minZ + 1) * step,
-                anchorX - radius + centerGridX * step,
-                anchorZ - radius + centerGridZ * step,
-                representative.gridX(),
-                representative.gridZ()
-        );
+        return new ComponentShape(cells, minX, maxX, minZ, maxZ);
     }
 
-    private static int nearestOtherLandGap(
-            boolean[][] land,
-            LandComponent component,
-            int step,
-            int radius
-    ) {
+    private static int componentGap(List<Cell> first, List<Cell> second, int step) {
         int bestSq = Integer.MAX_VALUE;
-        int size = land.length;
-        for (int gz = 0; gz < size; gz++) {
-            for (int gx = 0; gx < size; gx++) {
-                if (!land[gz][gx] || component.visited()[gz][gx]) {
-                    continue;
-                }
-                for (Cell own : component.cells()) {
-                    int dx = (gx - own.gridX()) * step;
-                    int dz = (gz - own.gridZ()) * step;
-                    int distanceSq = dx * dx + dz * dz;
-                    if (distanceSq < bestSq) {
-                        bestSq = distanceSq;
-                    }
+        for (Cell a : first) {
+            for (Cell b : second) {
+                int dx = (a.gridX() - b.gridX()) * step;
+                int dz = (a.gridZ() - b.gridZ()) * step;
+                int distanceSq = dx * dx + dz * dz;
+                if (distanceSq < bestSq) {
+                    bestSq = distanceSq;
                 }
             }
-        }
-        if (bestSq == Integer.MAX_VALUE) {
-            return radius * 2;
         }
         return Math.max(0, (int) Math.round(Math.sqrt(bestSq)) - step);
     }
@@ -812,6 +895,15 @@ public final class StarterSeedCli {
     private record Cell(int gridX, int gridZ) {
     }
 
+    private record ComponentShape(
+            List<Cell> cells,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ
+    ) {
+    }
+
     private record LandComponent(
             List<Cell> cells,
             boolean[][] visited,
@@ -824,6 +916,9 @@ public final class StarterSeedCli {
     ) {
     }
 
+    private record NeighborInfo(int gap, int span, int sampledArea) {
+    }
+
     private record CoalLocation(int x, int z) {
     }
 
@@ -833,6 +928,8 @@ public final class StarterSeedCli {
             int width,
             int height,
             int neighborGap,
+            int neighborSpan,
+            int neighborSampledArea,
             int starterDistance,
             double heightStdDev,
             int tpX,
@@ -851,6 +948,8 @@ public final class StarterSeedCli {
                     width,
                     height,
                     neighborGap,
+                    neighborSpan,
+                    neighborSampledArea,
                     starterDistance,
                     heightStdDev,
                     tpX,

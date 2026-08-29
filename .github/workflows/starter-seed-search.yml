@@ -20,15 +20,10 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Accept development-server EULA
-        run: |
-          mkdir -p run
-          echo 'eula=true' > run/eula.txt
-
-      - name: Search real Foundry/Tectonic starter seeds
+      - name: Exercise continuous starter-seed CLI
         run: |
           chmod +x gradlew
-          # Let Forge finish loading, launch the deterministic scanner, then give it a generous
-          # window to score the real Tectonic terrain/biomes before shutting the dev server down.
-          ( sleep 45; echo 'foundry starterseed 8000'; sleep 600; echo 'stop' ) \
-            | timeout 900s ./gradlew runServer -PfoundryJourneyMap=false --console=plain
+          # The task creates its isolated EULA, disables JourneyMap, boots the real dedicated
+          # Forge/Tectonic/COE runtime, and searches continuously. Cap CI runtime; local runs may
+          # continue until a qualifying seed is found.
+          timeout 900s ./gradlew starterSeedSearch --console=plain

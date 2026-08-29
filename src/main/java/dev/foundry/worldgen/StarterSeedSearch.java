@@ -287,7 +287,7 @@ public final class StarterSeedSearch {
             return null;
         }
 
-        Component component = floodComponent(land, nearestX, nearestZ, EXACT_STEP, EXACT_RADIUS);
+        LandComponent component = floodComponent(land, nearestX, nearestZ, EXACT_STEP, EXACT_RADIUS);
         if (component == null) {
             return null;
         }
@@ -400,7 +400,7 @@ public final class StarterSeedSearch {
             return null;
         }
 
-        Component component = floodComponent(land, nearestX, nearestZ, step, radius);
+        LandComponent component = floodComponent(land, nearestX, nearestZ, step, radius);
         if (component == null) {
             return null;
         }
@@ -415,7 +415,7 @@ public final class StarterSeedSearch {
         );
     }
 
-    private static Component floodComponent(
+    private static LandComponent floodComponent(
             boolean[][] land,
             int startX,
             int startZ,
@@ -464,7 +464,7 @@ public final class StarterSeedSearch {
         int centerWorldX = -radius + centerGridX * step;
         int centerWorldZ = -radius + centerGridZ * step;
 
-        return new Component(
+        return new LandComponent(
                 cells,
                 visited,
                 (maxX - minX + 1) * step,
@@ -476,7 +476,7 @@ public final class StarterSeedSearch {
 
     private static int nearestOtherLandGap(
             boolean[][] land,
-            Component component,
+            LandComponent component,
             int step,
             int radius
     ) {
@@ -543,7 +543,7 @@ public final class StarterSeedSearch {
     }
 
     private static boolean containsWorld(
-            Component component,
+            LandComponent component,
             int worldX,
             int worldZ,
             int step,
@@ -565,7 +565,7 @@ public final class StarterSeedSearch {
     private record Cell(int gridX, int gridZ) {
     }
 
-    private record Component(
+    private record LandComponent(
             List<Cell> cells,
             boolean[][] visited,
             int width,

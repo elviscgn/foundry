@@ -121,7 +121,12 @@ public abstract class RandomStateMixin {
                 mapped.veinGap()
         );
 
-        System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — cached 2D field; mushroom-safe deep-ocean floor; Tectonic owns physical terrain (seed "
-                + seed + ")");
+        // The CLI seed curator constructs many temporary RandomStates by design. Logging every
+        // candidate makes the terminal unreadable and adds avoidable console I/O; normal game/dev
+        // runs retain the activation proof line.
+        if (!Boolean.getBoolean("foundry.starterSeedSearch")) {
+            System.out.println("[Foundry] LIVE OVERWORLD STRATEGIC CONTINENTALNESS ACTIVE — cached 2D field; mushroom-safe deep-ocean floor; Tectonic owns physical terrain (seed "
+                    + seed + ")");
+        }
     }
 }

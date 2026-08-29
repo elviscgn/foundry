@@ -1,6 +1,7 @@
 package dev.foundry;
 
 import dev.foundry.compat.CreateOreExcavationCompat;
+import dev.foundry.geology.FoundryGeologyPacks;
 import dev.foundry.network.FoundryNetwork;
 import dev.foundry.registry.ModBlockEntities;
 import dev.foundry.registry.ModBlocks;
@@ -8,6 +9,7 @@ import dev.foundry.registry.ModItems;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.BuildCreativeModeTabContentsEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -23,10 +25,13 @@ public final class Foundry {
         ModBlockEntities.register(modEventBus);
         FoundryNetwork.register();
         modEventBus.addListener(this::addCreativeTabContents);
+        modEventBus.addListener(EventPriority.LOWEST, FoundryGeologyPacks::register);
 
         // Worldgen is intentionally NOT routed through a Foundry datapack anymore. Tectonic and
         // Continents finish their normal wiring first; RandomStateMixin then clamps the finished
         // live Overworld NoiseRouter in code. That leaves one authoritative worldgen path.
+        // Geology is different: COE is data-driven, so a required TOP data pack is the clean,
+        // deterministic authority for strategic deposit spacing and Foundry fluid reservoirs.
 
         // Tiger Ascent treats resource geography as exhaustible. Create Ore Excavation supplies
         // the finder/atlas/drilling UX while Foundry forces its reserve model out of infinite mode.

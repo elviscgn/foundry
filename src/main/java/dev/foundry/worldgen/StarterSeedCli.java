@@ -2,12 +2,17 @@ package dev.foundry.worldgen;
 
 import com.tom.createores.recipe.VeinRecipe;
 import dev.foundry.Foundry;
+import net.minecraft.core.Holder;
+import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BiomeTags;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
 import net.minecraft.world.level.levelgen.NoiseGeneratorSettings;
 import net.minecraft.world.level.levelgen.RandomState;
@@ -31,10 +36,15 @@ import java.util.concurrent.CompletableFuture;
 /**
  * Headless, continuous starter-seed curator used by the Gradle starterSeedSearch task.
  *
- * The actual geography/terrain checks remain authoritative in StarterSeedSearch. This class
- * deliberately reuses those exact coarse and exact evaluators, but advances through unbounded
- * seed ranges until a candidate meets hard acceptance criteria instead of merely returning the
- * best candidate from a fixed-size batch.
+ * The search is deliberately staged so the expensive Tectonic height solver is only used where
+ * it buys us information:
+ *
+ *  1. StrategicMacroMask + COE placement cheaply screen a large deterministic seed range.
+ *  2. A sparse 7x7 real-Tectonic preview estimates jungle share and relief for the best geometry.
+ *  3. Only the two best previews pay for StarterSeedSearch's full 16-block terrain/biome raster.
+ *
+ * A reported winner therefore still passes the same high-resolution final checks; the sparse pass
+ * only decides which candidates are worth spending that expensive verification on.
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class StarterSeedCli {
@@ -42,8 +52,17 @@ public final class StarterSeedCli {
     private static final ResourceLocation COAL_VEIN =
             new ResourceLocation("createoreexcavation", "ore_vein_type/coal");
 
-    private static final int BATCH_SIZE = 10_000;
-    private static final int FINALISTS_PER_BATCH = 24;
+    // Cheap strategic math is fast, so amortize each expensive Tectonic verification over a large batch.
+    private static final int BATCH_SIZE = 20_000;
+    private static final int PREVIEW_CANDIDATES_PER_BATCH = 24;
+    private static final int EXACT_FINALISTS_PER_BATCH = 2;
+
+    // Sparse physical preview: 7x7 = 49 real height probes per candidate instead of 6,561.
+    private static final int PREVIEW_RADIUS = 192;
+    private static final int PREVIEW_STEP = 64;
+    private static final double PREVIEW_MIN_JUNGLE_SHARE = 0.30;
+    private static final double PREVIEW_MAX_HEIGHT_STD_DEV = 18.0;
+    private static final int PREVIEW_MIN_LAND_SAMPLES = 5;
 
     // Hard acceptance gates for the canonical Tiger Ascent starter geography.
     private static final int MIN_ISLAND_SPAN = 240;
@@ -52,6 +71,7 @@ public final class StarterSeedCli {
     private static final int MAX_NEIGHBOR_GAP = 450;
     private static final double MIN_JUNGLE_SHARE = 0.60;
     private static final double MAX_HEIGHT_STD_DEV = 10.0;
+    private static final double TARGET_JUNGLE_SHARE = 0.70;
 
     private StarterSeedCli() {
     }
@@ -64,10 +84,10 @@ public final class StarterSeedCli {
 
         MinecraftServer server = event.getServer();
         System.out.println("[Foundry] CLI starter-seed search enabled.");
-        System.out.println("[Foundry] Searching continuously until a seed passes every hard gate.");
+        System.out.println("[Foundry] Optimized pipeline: 20k cheap seeds -> 24 sparse previews -> 2 exact finalists.");
         System.out.println(String.format(
                 Locale.ROOT,
-                "[Foundry] Gates: island %d-%d blocks | neighbor %d-%d | jungle >= %.0f%% | height SD <= %.1f | coal ON ISLAND",
+                "[Foundry] FINAL GATES: island %d-%d blocks | neighbor %d-%d | jungle >= %.0f%% | height SD <= %.1f | coal ON ISLAND",
                 MIN_ISLAND_SPAN,
                 MAX_ISLAND_SPAN,
                 MIN_NEIGHBOR_GAP,
@@ -75,6 +95,7 @@ public final class StarterSeedCli {
                 MIN_JUNGLE_SHARE * 100.0,
                 MAX_HEIGHT_STD_DEV
         ));
+        System.out.println("[Foundry] Winner will be saved to run-seed-search/starter-seed-result.txt");
 
         CompletableFuture.runAsync(() -> runUntilFound(server));
     }
@@ -120,7 +141,7 @@ public final class StarterSeedCli {
 
             while (server.isRunning()) {
                 List<ScoredCandidate> coarse = new ArrayList<>();
-                long batchStart = tested;
+                long batchFirstSeedIndex = globalIndex;
 
                 for (int i = 0; i < BATCH_SIZE && server.isRunning(); i++, globalIndex++) {
                     long seed = alternatingSeed(globalIndex);
@@ -132,23 +153,58 @@ public final class StarterSeedCli {
                 }
 
                 coarse.sort(Comparator.comparingDouble(ScoredCandidate::score));
-                int finalists = Math.min(FINALISTS_PER_BATCH, coarse.size());
+                int previewCount = Math.min(PREVIEW_CANDIDATES_PER_BATCH, coarse.size());
+                System.out.println(String.format(
+                        Locale.ROOT,
+                        "[Foundry] %,d seeds cheap-screened | %,d strategic+coal survivors | sparse-previewing %d...",
+                        tested,
+                        coarse.size(),
+                        previewCount
+                ));
+
+                List<PreviewCandidate> previews = new ArrayList<>(previewCount);
+                for (int i = 0; i < previewCount && server.isRunning(); i++) {
+                    Object coarseCandidate = coarse.get(i).candidate();
+                    long seed = longAccessor(coarseCandidate, "seed");
+                    double coarseScore = coarse.get(i).score();
+                    RandomState randomState = RandomState.create(settings, noiseRegistry.asLookup(), seed);
+
+                    PreviewCandidate preview = sparsePreview(
+                            level,
+                            generator,
+                            biomeSource,
+                            randomState,
+                            seed,
+                            coarseScore
+                    );
+                    if (preview != null) {
+                        previews.add(preview);
+                    }
+                }
+
+                previews.sort(Comparator.comparingDouble(PreviewCandidate::score));
+                int exactCount = Math.min(EXACT_FINALISTS_PER_BATCH, previews.size());
+                System.out.println(String.format(
+                        Locale.ROOT,
+                        "[Foundry] sparse preview kept %d/%d | exact-verifying %d...",
+                        previews.size(),
+                        previewCount,
+                        exactCount
+                ));
 
                 Object bestThisBatch = null;
                 double bestScore = Double.POSITIVE_INFINITY;
 
-                for (int i = 0; i < finalists && server.isRunning(); i++) {
-                    Object coarseCandidate = coarse.get(i).candidate();
-                    long seed = longAccessor(coarseCandidate, "seed");
-                    RandomState randomState = RandomState.create(settings, noiseRegistry.asLookup(), seed);
+                for (int i = 0; i < exactCount && server.isRunning(); i++) {
+                    PreviewCandidate preview = previews.get(i);
                     Object exact = exactMethod.invoke(
                             null,
                             level,
                             generator,
                             biomeSource,
-                            randomState,
+                            preview.randomState(),
                             coalPlacement,
-                            seed
+                            preview.seed()
                     );
                     if (exact == null) {
                         continue;
@@ -168,16 +224,17 @@ public final class StarterSeedCli {
                 }
 
                 double elapsedSeconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0;
+                double seedsPerSecond = tested / Math.max(0.001, elapsedSeconds);
                 String bestSummary = bestThisBatch == null
-                        ? "no exact finalist"
+                        ? (previews.isEmpty() ? "no physical preview survived" : "no exact finalist survived")
                         : summarize(bestThisBatch);
                 System.out.println(String.format(
                         Locale.ROOT,
-                        "[Foundry] tested %,d seeds (batch %,d-%,d) in %.1fs | best: %s",
+                        "[Foundry] batch index %,d-%,d complete | tested %,d total | %.0f seeds/s overall | best: %s",
+                        batchFirstSeedIndex,
+                        globalIndex - 1,
                         tested,
-                        batchStart,
-                        tested - 1,
-                        elapsedSeconds,
+                        seedsPerSecond,
                         bestSummary
                 ));
             }
@@ -186,6 +243,75 @@ public final class StarterSeedCli {
             error.printStackTrace();
             server.execute(() -> server.halt(false));
         }
+    }
+
+    /**
+     * Very cheap real-world preview used only to rank strategic-mask survivors. It intentionally
+     * uses loose gates so a potentially good candidate is not rejected because of the 64-block
+     * sampling grid. The final 16-block raster remains authoritative.
+     */
+    private static PreviewCandidate sparsePreview(
+            ServerLevel level,
+            NoiseBasedChunkGenerator generator,
+            BiomeSource biomeSource,
+            RandomState randomState,
+            long seed,
+            double coarseScore
+    ) {
+        int seaLevel = generator.getSeaLevel();
+        double heightSum = 0.0;
+        double heightSqSum = 0.0;
+        int landSamples = 0;
+        int jungleSamples = 0;
+
+        for (int z = -PREVIEW_RADIUS; z <= PREVIEW_RADIUS; z += PREVIEW_STEP) {
+            for (int x = -PREVIEW_RADIUS; x <= PREVIEW_RADIUS; x += PREVIEW_STEP) {
+                int height = generator.getBaseHeight(
+                        x,
+                        z,
+                        Heightmap.Types.OCEAN_FLOOR_WG,
+                        level,
+                        randomState
+                );
+                if (height <= seaLevel) {
+                    continue;
+                }
+
+                landSamples++;
+                heightSum += height;
+                heightSqSum += (double) height * height;
+
+                Holder<Biome> biome = biomeSource.getNoiseBiome(
+                        QuartPos.fromBlock(x),
+                        QuartPos.fromBlock(height),
+                        QuartPos.fromBlock(z),
+                        randomState.sampler()
+                );
+                if (biome.is(BiomeTags.IS_JUNGLE)) {
+                    jungleSamples++;
+                }
+            }
+        }
+
+        if (landSamples < PREVIEW_MIN_LAND_SAMPLES) {
+            return null;
+        }
+
+        double mean = heightSum / landSamples;
+        double variance = heightSqSum / landSamples - mean * mean;
+        double heightStdDev = Math.sqrt(Math.max(0.0, variance));
+        double jungleShare = (double) jungleSamples / landSamples;
+
+        // These gates are intentionally much looser than the final acceptance contract.
+        if (jungleShare < PREVIEW_MIN_JUNGLE_SHARE || heightStdDev > PREVIEW_MAX_HEIGHT_STD_DEV) {
+            return null;
+        }
+
+        double score = coarseScore
+                + Math.max(0.0, TARGET_JUNGLE_SHARE - jungleShare) * 900.0
+                + heightStdDev * 12.0;
+
+        return new PreviewCandidate(seed, score, jungleShare, heightStdDev, landSamples, randomState);
     }
 
     private static boolean passesHardGates(Object candidate) throws ReflectiveOperationException {
@@ -250,7 +376,7 @@ public final class StarterSeedCli {
                 result,
                 StandardCharsets.UTF_8
         );
-        System.out.println("[Foundry] Saved result to starter-seed-result.txt");
+        System.out.println("[Foundry] Saved result to run-seed-search/starter-seed-result.txt");
     }
 
     private static String summarize(Object candidate) throws ReflectiveOperationException {
@@ -295,5 +421,15 @@ public final class StarterSeedCli {
     }
 
     private record ScoredCandidate(Object candidate, double score) {
+    }
+
+    private record PreviewCandidate(
+            long seed,
+            double score,
+            double jungleShare,
+            double heightStdDev,
+            int landSamples,
+            RandomState randomState
+    ) {
     }
 }

@@ -31,17 +31,11 @@ import java.util.PriorityQueue;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Headless, continuous starter-seed curator used by the Gradle starterSeedSearch task.
+ * Headless continuous curator for the canonical Tiger Ascent starter geography.
  *
- * Search pipeline:
- *  1. Enumerate the exact StrategicMacroMask site lattice across the whole starter region and use
- *     COE coal placement to cheaply rank small-island opportunities for each seed.
- *  2. The best site candidates get a 32-block real-Tectonic physical island raster.
- *  3. Only the best physical candidates pay for the authoritative 16-block raster.
- *
- * Biome is unrestricted. A winner is selected by physical island geometry, separation from the
- * nearest meaningful separate landmass, relief, starter-region distance, and coal actually lying
- * on the island. Tiny offshore rocks are deliberately ignored by the neighbor-gap measurement.
+ * Cheap strategic/placement math is ranking only. Physical acceptance comes from the live
+ * Tectonic/Foundry NoiseBasedChunkGenerator with a seed-specific RandomState, and coal acceptance
+ * mirrors Create Ore Excavation's real recipe-priority + biome generation rules.
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class StarterSeedCli {
@@ -54,37 +48,25 @@ public final class StarterSeedCli {
     private static final int MEDIUM_CANDIDATES_PER_BATCH = 16;
     private static final int EXACT_FINALISTS_PER_BATCH = 3;
 
-    // Search slightly beyond the hard 5k rule so a site's center may sit outside the radius while
-    // its actual usable island land still lies inside it.
     private static final int MAX_STARTER_DISTANCE = 5_000;
     private static final int SITE_ENUMERATION_RADIUS = 5_500;
 
-    // Small physical islands normally come from the low end of the strategic diameter distribution.
-    // Keep this broad because Tectonic/coast carving determines the final physical land span.
     private static final double MIN_COARSE_NOMINAL_DIAMETER = 500.0;
     private static final double MAX_COARSE_NOMINAL_DIAMETER = 950.0;
     private static final double TARGET_COARSE_NOMINAL_DIAMETER = 575.0;
     private static final int MAX_COARSE_COAL_CENTER_DISTANCE = 500;
 
-    // 704 captures the starter island plus enough surrounding sea/land for the requested gap in the
-    // great majority of cases. Border-touching neighbor components are handled specially below so a
-    // large landmass is not mistaken for a tiny islet merely because only its coast enters the raster.
     private static final int MEDIUM_RADIUS = 704;
     private static final int MEDIUM_STEP = 32;
     private static final int EXACT_RADIUS = 704;
     private static final int EXACT_STEP = 16;
 
-    // Hard acceptance gates for the requested starter geography.
     private static final int MIN_ISLAND_SPAN = 240;
     private static final int MAX_ISLAND_SPAN = 420;
     private static final int MIN_NEIGHBOR_GAP = 180;
     private static final int MAX_NEIGHBOR_GAP = 450;
     private static final double MAX_HEIGHT_STD_DEV = 10.0;
 
-    // A separate component must be large enough to matter strategically before it is allowed to
-    // define "neighbor gap". At exact 16-block sampling, 12k sampled blocks is roughly 47 land
-    // samples; at 32-block preview resolution it is roughly 12 samples. A component that reaches
-    // the raster boundary is accepted by span alone because its unseen continuation is truncated.
     private static final int MIN_MEANINGFUL_NEIGHBOR_SPAN = 160;
     private static final int MIN_MEANINGFUL_NEIGHBOR_AREA = 12_000;
 
@@ -102,11 +84,11 @@ public final class StarterSeedCli {
 
         MinecraftServer server = event.getServer();
         System.out.println("[Foundry] CLI starter-seed search enabled.");
-        System.out.println("[Foundry] Search region: any qualifying island whose usable TP point is within 5,000 blocks of world origin/spawn area.");
-        System.out.println("[Foundry] Pipeline: exact strategic-site index -> 16 real 32-block island rasters -> 3 exact 16-block finalists.");
+        System.out.println("[Foundry] Search region: qualifying TP point within 5,000 blocks of 0,0/spawn area; island need not contain spawn.");
+        System.out.println("[Foundry] Pipeline: strategic-site index -> 16 real 32-block rasters -> 3 exact 16-block finalists.");
         System.out.println(String.format(
                 Locale.ROOT,
-                "[Foundry] FINAL GATES: island %d-%d | meaningful neighbor %d-%d | TP distance <= %,d | height SD <= %.1f | coal ON ISLAND | biome unrestricted",
+                "[Foundry] FINAL GATES: island %d-%d | meaningful neighbor %d-%d | TP <= %,d from 0,0 | height SD <= %.1f | VERIFIED COE coal ON ISLAND | biome unrestricted",
                 MIN_ISLAND_SPAN,
                 MAX_ISLAND_SPAN,
                 MIN_NEIGHBOR_GAP,
@@ -116,10 +98,11 @@ public final class StarterSeedCli {
         ));
         System.out.println(String.format(
                 Locale.ROOT,
-                "[Foundry] Meaningful neighbor = separate landmass >= %d blocks across and ~%,d+ sampled land blocks; tiny rocks/islets ignored.",
+                "[Foundry] Meaningful neighbor: separate landmass >= %d blocks across and ~%,d+ estimated land area; tiny rocks ignored.",
                 MIN_MEANINGFUL_NEIGHBOR_SPAN,
                 MIN_MEANINGFUL_NEIGHBOR_AREA
         ));
+        System.out.println("[Foundry] Coal hard gate now mirrors COE recipe priority + biome generation; raw potential placements do NOT count.");
         System.out.println("[Foundry] Winner:    run-seed-search/starter-seed-result.txt");
         System.out.println("[Foundry] Near miss: run-seed-search/starter-seed-nearmiss.txt");
 
@@ -138,6 +121,7 @@ public final class StarterSeedCli {
                     .map(VeinRecipe.class::cast)
                     .orElseThrow(() -> new IllegalStateException("COE coal vein recipe is not loaded"));
             RandomSpreadStructurePlacement coalPlacement = coal.getPlacement();
+            List<VeinRecipe> orderedVeinRecipes = CoeSeedLocator.orderedVeinRecipes(level);
 
             NoiseGeneratorSettings settings = generator.generatorSettings().value();
             Registry<NormalNoise.NoiseParameters> noiseRegistry =
@@ -154,7 +138,7 @@ public final class StarterSeedCli {
                         Comparator.comparingDouble(CoarseCandidate::score).reversed()
                 );
                 long strategicSitesInspected = 0L;
-                long smallSitesWithCoal = 0L;
+                long smallSitesWithPotentialCoal = 0L;
 
                 for (int i = 0; i < BATCH_SIZE && server.isRunning(); i++, globalIndex++) {
                     long seed = alternatingSeed(globalIndex);
@@ -169,25 +153,27 @@ public final class StarterSeedCli {
                             continue;
                         }
 
-                        CoalLocation coalLocation = nearestCoalRegions(
+                        // Cheap ranking only. Actual COE generation is checked after RandomState is
+                        // created for the physical stage.
+                        CoalLocation potentialCoal = nearestPotentialCoal(
                                 seed,
                                 coalPlacement,
                                 site.centerX(),
                                 site.centerZ(),
                                 1
                         );
-                        if (coalLocation == null) {
+                        if (potentialCoal == null) {
                             continue;
                         }
 
                         int coalCenterDistance = (int) Math.round(Math.hypot(
-                                coalLocation.x() - site.centerX(),
-                                coalLocation.z() - site.centerZ()
+                                potentialCoal.x() - site.centerX(),
+                                potentialCoal.z() - site.centerZ()
                         ));
                         if (coalCenterDistance > MAX_COARSE_COAL_CENTER_DISTANCE) {
                             continue;
                         }
-                        smallSitesWithCoal++;
+                        smallSitesWithPotentialCoal++;
 
                         double siteDistance = Math.hypot(site.centerX(), site.centerZ());
                         double score = Math.abs(diameter - TARGET_COARSE_NOMINAL_DIAMETER)
@@ -212,10 +198,10 @@ public final class StarterSeedCli {
                 int mediumCount = Math.min(MEDIUM_CANDIDATES_PER_BATCH, coarse.size());
                 System.out.println(String.format(
                         Locale.ROOT,
-                        "[Foundry] %,d seeds screened | %,d strategic sites inspected | %,d small+coal sites | physical-screening %d...",
+                        "[Foundry] %,d seeds screened | %,d strategic sites | %,d small+potential-coal sites | physical-screening %d...",
                         tested,
                         strategicSitesInspected,
-                        smallSitesWithCoal,
+                        smallSitesWithPotentialCoal,
                         mediumCount
                 ));
 
@@ -231,7 +217,8 @@ public final class StarterSeedCli {
                             level,
                             generator,
                             randomState,
-                            coalPlacement,
+                            orderedVeinRecipes,
+                            coal,
                             candidate.seed(),
                             candidate.anchorX(),
                             candidate.anchorZ(),
@@ -262,7 +249,8 @@ public final class StarterSeedCli {
                             level,
                             generator,
                             preview.randomState(),
-                            coalPlacement,
+                            orderedVeinRecipes,
+                            coal,
                             preview.seed(),
                             preview.tpX(),
                             preview.tpZ(),
@@ -271,7 +259,7 @@ public final class StarterSeedCli {
                     );
                     if (exact == null) {
                         System.out.println("[Foundry] exact seed " + preview.seed()
-                                + " had no usable physical island around candidate coordinates "
+                                + " had no usable island/verified coal around "
                                 + preview.tpX() + "," + preview.tpZ() + ".");
                         continue;
                     }
@@ -281,7 +269,6 @@ public final class StarterSeedCli {
                         bestBatchMissScore = missScore;
                         bestBatchExact = exact;
                     }
-
                     if (missScore < bestNearMissScore) {
                         bestNearMissScore = missScore;
                         saveNearMiss(exact, tested, startedNanos);
@@ -300,7 +287,7 @@ public final class StarterSeedCli {
                 double elapsedSeconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0;
                 double seedsPerSecond = tested / Math.max(0.001, elapsedSeconds);
                 String bestSummary = bestBatchExact == null
-                        ? "no exact physical candidate survived"
+                        ? "no exact physical candidate with verified COE coal survived"
                         : summarize(bestBatchExact) + " | FAIL: " + failureReasons(bestBatchExact);
                 System.out.println(String.format(
                         Locale.ROOT,
@@ -335,7 +322,8 @@ public final class StarterSeedCli {
             ServerLevel level,
             NoiseBasedChunkGenerator generator,
             RandomState randomState,
-            RandomSpreadStructurePlacement coalPlacement,
+            List<VeinRecipe> orderedVeinRecipes,
+            VeinRecipe coalRecipe,
             long seed,
             int anchorX,
             int anchorZ,
@@ -355,18 +343,11 @@ public final class StarterSeedCli {
             int z = anchorZ - radius + gz * step;
             for (int gx = 0; gx < cells; gx++) {
                 int x = anchorX - radius + gx * step;
-                int height = generator.getBaseHeight(
-                        x,
-                        z,
-                        Heightmap.Types.OCEAN_FLOOR_WG,
-                        level,
-                        randomState
-                );
+                int height = baseHeight(level, generator, randomState, x, z);
                 heights[gz][gx] = height;
                 if (height <= seaLevel) {
                     continue;
                 }
-
                 land[gz][gx] = true;
                 double dx = x - anchorX;
                 double dz = z - anchorZ;
@@ -412,12 +393,20 @@ public final class StarterSeedCli {
 
         int tpX = anchorX - radius + component.representativeGridX() * step;
         int tpZ = anchorZ - radius + component.representativeGridZ() * step;
-        int tpY = heights[component.representativeGridZ()][component.representativeGridX()] + 2;
+        int verifiedTpSurface = baseHeight(level, generator, randomState, tpX, tpZ);
+        if (verifiedTpSurface <= seaLevel) {
+            return null;
+        }
+        int tpY = verifiedTpSurface + 2;
         int starterDistance = (int) Math.round(Math.hypot(tpX, tpZ));
 
-        CoalLocation coal = nearestCoalRegions(
+        CoeSeedLocator.Location coal = CoeSeedLocator.nearestActualVein(
+                level,
+                generator,
+                randomState,
+                orderedVeinRecipes,
+                coalRecipe,
                 seed,
-                coalPlacement,
                 component.centerX(),
                 component.centerZ(),
                 3
@@ -426,7 +415,12 @@ public final class StarterSeedCli {
             return null;
         }
 
-        boolean coalOnIsland = containsWorld(
+        // Raw raster membership is not enough for a hard gate. Directly evaluate terrain at the
+        // exact generated COE vein coordinate, then require its nearest exact/preview component cell
+        // to belong to this same starter island.
+        int coalSurface = baseHeight(level, generator, randomState, coal.x(), coal.z());
+        boolean coalIsPhysicalLand = coalSurface > seaLevel;
+        boolean coalMapsToStarter = containsWorld(
                 component,
                 coal.x(),
                 coal.z(),
@@ -435,6 +429,7 @@ public final class StarterSeedCli {
                 anchorX,
                 anchorZ
         );
+        boolean coalOnIsland = coalIsPhysicalLand && coalMapsToStarter;
         int coalDistance = distanceToComponent(
                 component,
                 coal.x(),
@@ -452,7 +447,7 @@ public final class StarterSeedCli {
                 component.height(),
                 neighbor.gap(),
                 neighbor.span(),
-                neighbor.sampledArea(),
+                neighbor.estimatedArea(),
                 starterDistance,
                 heightStdDev,
                 tpX,
@@ -466,6 +461,22 @@ public final class StarterSeedCli {
         );
     }
 
+    private static int baseHeight(
+            ServerLevel level,
+            NoiseBasedChunkGenerator generator,
+            RandomState randomState,
+            int x,
+            int z
+    ) {
+        return generator.getBaseHeight(
+                x,
+                z,
+                Heightmap.Types.OCEAN_FLOOR_WG,
+                level,
+                randomState
+        );
+    }
+
     private static double mediumSelectionScore(PhysicalCandidate candidate, double coarseScore) {
         int span = Math.max(candidate.width(), candidate.height());
         double score = coarseScore * 0.08
@@ -473,15 +484,12 @@ public final class StarterSeedCli {
                 + Math.abs(candidate.neighborGap() - TARGET_NEIGHBOR_GAP) * 0.70
                 + candidate.heightStdDev() * 16.0
                 + candidate.starterDistance() * 0.002;
-
         score += outsideDistance(span, MIN_ISLAND_SPAN, MAX_ISLAND_SPAN) * 6.0;
         score += outsideDistance(candidate.neighborGap(), MIN_NEIGHBOR_GAP, MAX_NEIGHBOR_GAP) * 3.0;
         score += Math.max(0.0, candidate.heightStdDev() - MAX_HEIGHT_STD_DEV) * 90.0;
         score += Math.max(0, candidate.starterDistance() - MAX_STARTER_DISTANCE) * 5.0;
         if (!candidate.coalOnIsland()) {
-            // Medium 32-block coast sampling can be wrong by roughly one sample near the shoreline,
-            // so penalize rather than discard and let the 16-block pass make the final decision.
-            score += 160.0 + candidate.coalDistance() * 2.0;
+            score += 200.0 + candidate.coalDistance() * 3.0;
         }
         return score;
     }
@@ -512,12 +520,8 @@ public final class StarterSeedCli {
     }
 
     private static double outsideDistance(double value, double min, double max) {
-        if (value < min) {
-            return min - value;
-        }
-        if (value > max) {
-            return value - max;
-        }
+        if (value < min) return min - value;
+        if (value > max) return value - max;
         return 0.0;
     }
 
@@ -541,12 +545,12 @@ public final class StarterSeedCli {
             failures.add(String.format(Locale.ROOT, "height SD %.1f > %.1f", candidate.heightStdDev(), MAX_HEIGHT_STD_DEV));
         }
         if (!candidate.coalOnIsland()) {
-            failures.add("coal OFF ISLAND by ~" + candidate.coalDistance() + " blocks");
+            failures.add("verified COE coal OFF STARTER ISLAND by ~" + candidate.coalDistance() + " blocks");
         }
         return failures.isEmpty() ? "none" : String.join("; ", failures);
     }
 
-    private static void printAndSaveResult(PhysicalCandidate candidate, long tested, long startedNanos)
+    private static void printAndSaveResult(PhysicalCandidate c, long tested, long startedNanos)
             throws IOException {
         double elapsedSeconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0;
         String result = String.format(
@@ -554,99 +558,65 @@ public final class StarterSeedCli {
                 "========================================%n"
                         + "FOUNDRY STARTER SEED FOUND%n"
                         + "========================================%n"
-                        + "Seed: %d%n%n"
-                        + "Starter TP:     /tp @s %d %d %d%n"
-                        + "Starter coords: %d, %d, %d%n"
-                        + "Distance 0,0:   %d blocks (spawn-area proxy)%n"
-                        + "Island:         %d x %d%n"
-                        + "Neighbor gap:   %d blocks to meaningful land%n"
-                        + "Neighbor size:  ~%d-block span / ~%,d sampled land blocks%n"
-                        + "Height SD:      %.2f%n"
-                        + "Coal:           ON ISLAND at %d, %d%n"
-                        + "Biome:          unrestricted / not scored%n"
-                        + "Seeds tested:   %,d%n"
-                        + "Elapsed:        %.1f seconds%n"
+                        + "LOAD WORLD SEED: %d%n"
+                        + "THEN TELEPORT:   /tp @s %d %d %d%n%n"
+                        + "Starter coords:  %d, %d, %d%n"
+                        + "Distance 0,0:    %d blocks (spawn-area proxy)%n"
+                        + "Island:          %d x %d%n"
+                        + "Neighbor gap:    %d blocks to meaningful land%n"
+                        + "Neighbor size:   ~%d-block span / ~%,d estimated land area%n"
+                        + "Height SD:       %.2f%n"
+                        + "Coal:            VERIFIED COE coal ON ISLAND at %d, %d%n"
+                        + "Biome:           unrestricted / not scored%n"
+                        + "Seeds tested:    %,d%n"
+                        + "Elapsed:         %.1f seconds%n"
                         + "========================================%n",
-                candidate.seed(),
-                candidate.tpX(),
-                candidate.tpY(),
-                candidate.tpZ(),
-                candidate.tpX(),
-                candidate.tpY(),
-                candidate.tpZ(),
-                candidate.starterDistance(),
-                candidate.width(),
-                candidate.height(),
-                candidate.neighborGap(),
-                candidate.neighborSpan(),
-                candidate.neighborSampledArea(),
-                candidate.heightStdDev(),
-                candidate.coalX(),
-                candidate.coalZ(),
-                tested,
-                elapsedSeconds
+                c.seed(), c.tpX(), c.tpY(), c.tpZ(),
+                c.tpX(), c.tpY(), c.tpZ(), c.starterDistance(),
+                c.width(), c.height(), c.neighborGap(), c.neighborSpan(),
+                c.neighborEstimatedArea(), c.heightStdDev(), c.coalX(), c.coalZ(),
+                tested, elapsedSeconds
         );
-
         System.out.print(result);
         Files.writeString(Path.of("starter-seed-result.txt"), result, StandardCharsets.UTF_8);
         System.out.println("[Foundry] Saved result to run-seed-search/starter-seed-result.txt");
     }
 
-    private static void saveNearMiss(PhysicalCandidate candidate, long tested, long startedNanos)
+    private static void saveNearMiss(PhysicalCandidate c, long tested, long startedNanos)
             throws IOException {
         double elapsedSeconds = (System.nanoTime() - startedNanos) / 1_000_000_000.0;
         String result = String.format(
                 Locale.ROOT,
                 "FOUNDRY BEST STARTER-SEED NEAR MISS%n"
-                        + "Seed: %d%n"
+                        + "LOAD WORLD SEED: %d%n"
                         + "Starter TP: /tp @s %d %d %d%n"
                         + "Distance 0,0: %d blocks (spawn-area proxy)%n"
                         + "Island: %d x %d%n"
                         + "Meaningful neighbor gap: %d blocks%n"
-                        + "Neighbor size: ~%d-block span / ~%,d sampled land blocks%n"
+                        + "Neighbor size: ~%d-block span / ~%,d estimated land area%n"
                         + "Height SD: %.2f%n"
-                        + "Coal: %s at %d, %d (distance to island ~%d)%n"
+                        + "Coal: %s at %d, %d%s%n"
                         + "FAIL: %s%n"
                         + "Seeds tested when recorded: %,d%n"
                         + "Elapsed when recorded: %.1f seconds%n",
-                candidate.seed(),
-                candidate.tpX(),
-                candidate.tpY(),
-                candidate.tpZ(),
-                candidate.starterDistance(),
-                candidate.width(),
-                candidate.height(),
-                candidate.neighborGap(),
-                candidate.neighborSpan(),
-                candidate.neighborSampledArea(),
-                candidate.heightStdDev(),
-                candidate.coalOnIsland() ? "ON ISLAND" : "OFF ISLAND",
-                candidate.coalX(),
-                candidate.coalZ(),
-                candidate.coalDistance(),
-                failureReasons(candidate),
-                tested,
-                elapsedSeconds
+                c.seed(), c.tpX(), c.tpY(), c.tpZ(), c.starterDistance(),
+                c.width(), c.height(), c.neighborGap(), c.neighborSpan(),
+                c.neighborEstimatedArea(), c.heightStdDev(),
+                c.coalOnIsland() ? "VERIFIED COE coal ON ISLAND" : "VERIFIED COE coal OFF ISLAND",
+                c.coalX(), c.coalZ(),
+                c.coalOnIsland() ? "" : " (~" + c.coalDistance() + " blocks from sampled island)",
+                failureReasons(c), tested, elapsedSeconds
         );
         Files.writeString(Path.of("starter-seed-nearmiss.txt"), result, StandardCharsets.UTF_8);
     }
 
-    private static String summarize(PhysicalCandidate candidate) {
+    private static String summarize(PhysicalCandidate c) {
         return String.format(
                 Locale.ROOT,
-                "seed %d | TP %d,%d,%d | %dx%d | meaningful gap %d -> ~%d span | dist %.1fk | height SD %.1f | coal %s%s",
-                candidate.seed(),
-                candidate.tpX(),
-                candidate.tpY(),
-                candidate.tpZ(),
-                candidate.width(),
-                candidate.height(),
-                candidate.neighborGap(),
-                candidate.neighborSpan(),
-                candidate.starterDistance() / 1_000.0,
-                candidate.heightStdDev(),
-                candidate.coalOnIsland() ? "ON ISLAND" : "OFF ISLAND",
-                candidate.coalOnIsland() ? "" : " (~" + candidate.coalDistance() + " blocks)"
+                "seed %d | TP %d,%d,%d | %dx%d | meaningful gap %d -> ~%d span | dist %.1fk | SD %.1f | %s",
+                c.seed(), c.tpX(), c.tpY(), c.tpZ(), c.width(), c.height(),
+                c.neighborGap(), c.neighborSpan(), c.starterDistance() / 1_000.0,
+                c.heightStdDev(), c.coalOnIsland() ? "COE COAL ON ISLAND" : "COE coal off island"
         );
     }
 
@@ -661,18 +631,16 @@ public final class StarterSeedCli {
     ) {
         boolean[][] visited = new boolean[land.length][land[0].length];
         ComponentShape shape = collectComponent(land, startX, startZ, visited);
-        if (shape.cells().isEmpty()) {
-            return null;
-        }
+        if (shape.cells().isEmpty()) return null;
 
         int centerGridX = (shape.minX() + shape.maxX()) / 2;
         int centerGridZ = (shape.minZ() + shape.maxZ()) / 2;
         Cell representative = shape.cells().get(0);
         int bestRepresentativeSq = Integer.MAX_VALUE;
         for (Cell cell : shape.cells()) {
-            int ddx = cell.gridX() - centerGridX;
-            int ddz = cell.gridZ() - centerGridZ;
-            int distanceSq = ddx * ddx + ddz * ddz;
+            int dx = cell.gridX() - centerGridX;
+            int dz = cell.gridZ() - centerGridZ;
+            int distanceSq = dx * dx + dz * dz;
             if (distanceSq < bestRepresentativeSq) {
                 bestRepresentativeSq = distanceSq;
                 representative = cell;
@@ -691,11 +659,6 @@ public final class StarterSeedCli {
         );
     }
 
-    /**
-     * Finds the nearest separate component that is large enough to represent actual neighboring
-     * geography. This is deliberately component-aware: a single offshore pixel/rock no longer
-     * defines the gap for a 300-block starter island.
-     */
     private static NeighborInfo nearestMeaningfulNeighbor(
             boolean[][] land,
             LandComponent starter,
@@ -715,31 +678,26 @@ public final class StarterSeedCli {
 
         for (int gz = 0; gz < rows; gz++) {
             for (int gx = 0; gx < cols; gx++) {
-                if (!land[gz][gx] || seen[gz][gx]) {
-                    continue;
-                }
+                if (!land[gz][gx] || seen[gz][gx]) continue;
 
                 ComponentShape other = collectComponent(land, gx, gz, seen);
                 int width = (other.maxX() - other.minX() + 1) * step;
                 int height = (other.maxZ() - other.minZ() + 1) * step;
                 int span = Math.max(width, height);
-                int sampledArea = other.cells().size() * step * step;
+                int estimatedArea = other.cells().size() * step * step;
                 boolean touchesBorder = other.minX() == 0
                         || other.minZ() == 0
                         || other.maxX() == cols - 1
                         || other.maxZ() == rows - 1;
-
                 boolean meaningful = span >= MIN_MEANINGFUL_NEIGHBOR_SPAN
-                        && (sampledArea >= MIN_MEANINGFUL_NEIGHBOR_AREA || touchesBorder);
-                if (!meaningful) {
-                    continue;
-                }
+                        && (estimatedArea >= MIN_MEANINGFUL_NEIGHBOR_AREA || touchesBorder);
+                if (!meaningful) continue;
 
                 int gap = componentGap(starter.cells(), other.cells(), step);
                 if (gap < bestGap) {
                     bestGap = gap;
                     bestSpan = span;
-                    bestArea = sampledArea;
+                    bestArea = estimatedArea;
                 }
             }
         }
@@ -781,17 +739,12 @@ public final class StarterSeedCli {
             for (int direction = 0; direction < 4; direction++) {
                 int nx = cell.gridX() + dx[direction];
                 int nz = cell.gridZ() + dz[direction];
-                if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) {
-                    continue;
-                }
-                if (!land[nz][nx] || visited[nz][nx]) {
-                    continue;
-                }
+                if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
+                if (!land[nz][nx] || visited[nz][nx]) continue;
                 visited[nz][nx] = true;
                 queue.addLast(new Cell(nx, nz));
             }
         }
-
         return new ComponentShape(cells, minX, maxX, minZ, maxZ);
     }
 
@@ -802,15 +755,14 @@ public final class StarterSeedCli {
                 int dx = (a.gridX() - b.gridX()) * step;
                 int dz = (a.gridZ() - b.gridZ()) * step;
                 int distanceSq = dx * dx + dz * dz;
-                if (distanceSq < bestSq) {
-                    bestSq = distanceSq;
-                }
+                if (distanceSq < bestSq) bestSq = distanceSq;
             }
         }
         return Math.max(0, (int) Math.round(Math.sqrt(bestSq)) - step);
     }
 
-    private static CoalLocation nearestCoalRegions(
+    /** Cheap potential-placement lookup used ONLY before a candidate RandomState exists. */
+    private static CoalLocation nearestPotentialCoal(
             long seed,
             RandomSpreadStructurePlacement placement,
             int targetX,
@@ -822,9 +774,9 @@ public final class StarterSeedCli {
         int targetChunkZ = Math.floorDiv(targetZ, 16);
         int targetRegionX = Math.floorDiv(targetChunkX, spacing);
         int targetRegionZ = Math.floorDiv(targetChunkZ, spacing);
-
         CoalLocation best = null;
         double bestDistance = Double.POSITIVE_INFINITY;
+
         for (int rz = targetRegionZ - regionRadius; rz <= targetRegionZ + regionRadius; rz++) {
             for (int rx = targetRegionX - regionRadius; rx <= targetRegionX + regionRadius; rx++) {
                 ChunkPos chunk = placement.getPotentialStructureChunk(seed, rx * spacing, rz * spacing);
@@ -889,11 +841,9 @@ public final class StarterSeedCli {
             double nominalDiameter,
             int coalCenterDistance,
             double score
-    ) {
-    }
+    ) {}
 
-    private record Cell(int gridX, int gridZ) {
-    }
+    private record Cell(int gridX, int gridZ) {}
 
     private record ComponentShape(
             List<Cell> cells,
@@ -901,8 +851,7 @@ public final class StarterSeedCli {
             int maxX,
             int minZ,
             int maxZ
-    ) {
-    }
+    ) {}
 
     private record LandComponent(
             List<Cell> cells,
@@ -913,14 +862,11 @@ public final class StarterSeedCli {
             int centerZ,
             int representativeGridX,
             int representativeGridZ
-    ) {
-    }
+    ) {}
 
-    private record NeighborInfo(int gap, int span, int sampledArea) {
-    }
+    private record NeighborInfo(int gap, int span, int estimatedArea) {}
 
-    private record CoalLocation(int x, int z) {
-    }
+    private record CoalLocation(int x, int z) {}
 
     private record PhysicalCandidate(
             long seed,
@@ -929,7 +875,7 @@ public final class StarterSeedCli {
             int height,
             int neighborGap,
             int neighborSpan,
-            int neighborSampledArea,
+            int neighborEstimatedArea,
             int starterDistance,
             double heightStdDev,
             int tpX,
@@ -943,23 +889,9 @@ public final class StarterSeedCli {
     ) {
         private PhysicalCandidate withScore(double newScore) {
             return new PhysicalCandidate(
-                    seed,
-                    newScore,
-                    width,
-                    height,
-                    neighborGap,
-                    neighborSpan,
-                    neighborSampledArea,
-                    starterDistance,
-                    heightStdDev,
-                    tpX,
-                    tpY,
-                    tpZ,
-                    coalX,
-                    coalZ,
-                    coalOnIsland,
-                    coalDistance,
-                    randomState
+                    seed, newScore, width, height, neighborGap, neighborSpan,
+                    neighborEstimatedArea, starterDistance, heightStdDev,
+                    tpX, tpY, tpZ, coalX, coalZ, coalOnIsland, coalDistance, randomState
             );
         }
     }

@@ -18,7 +18,10 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 
 def enableVulkan = (project.findProperty('foundryVulkan') ?: 'false').toString().toBoolean()
-def enableJourneyMap = !(project.findProperty('foundryJourneyMap') ?: 'true').toString().equalsIgnoreCase('false')
+def starterSeedSearchRequested = gradle.startParameter.taskNames.any {
+    it == 'starterSeedSearch' || it.endsWith(':starterSeedSearch')
+}
+def enableJourneyMap = !starterSeedSearchRequested && !(project.findProperty('foundryJourneyMap') ?: 'true').toString().equalsIgnoreCase('false')
 
 minecraft {
     mappings channel: mapping_channel, version: mapping_version
@@ -48,6 +51,14 @@ minecraft {
         server {
             property 'forge.enabledGameTestNamespaces', mod_id
             args '--nogui'
+
+            // The CLI curator needs the real Forge/Tectonic/COE registries, but no client mods or UI.
+            // Give it an isolated working directory and an explicit system property so Foundry can
+            // begin scanning as soon as the dedicated server reaches ServerStartedEvent.
+            if (starterSeedSearchRequested) {
+                workingDirectory project.file('run-seed-search')
+                property 'foundry.starterSeedSearch', 'true'
+            }
         }
 
         gameTestServer {
@@ -117,6 +128,8 @@ dependencies {
 
     // Fullscreen terrain map for worldgen iteration. Disable for clean FPS A/B tests with
     // -PfoundryJourneyMap=false, because live mapping itself costs CPU/GPU/chunk I/O.
+    // starterSeedSearch also disables it at dependency-resolution time so JourneyMap can never
+    // leak client classes onto the dedicated-server classpath.
     if (enableJourneyMap) {
         runtimeOnly fg.deobf("curse.maven:journeymap-32274:${journeymap_file_id}")
     }
@@ -181,4 +194,23 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// One-command, headless starter geography curator. It launches the normal Forge server runtime,
+// but the Java hook searches arbitrary seeds without generating those worlds and halts the server
+// as soon as a seed passes every hard starter criterion.
+tasks.register('starterSeedSearch') {
+    group = 'foundry'
+    description = 'Search continuously for the canonical Tiger Ascent starter seed.'
+    dependsOn 'runServer'
+}
+
+if (starterSeedSearchRequested) {
+    tasks.named('runServer').configure {
+        doFirst {
+            def searchDir = file('run-seed-search')
+            searchDir.mkdirs()
+            file("${searchDir}/eula.txt").text = 'eula=true\n'
+        }
+    }
 }

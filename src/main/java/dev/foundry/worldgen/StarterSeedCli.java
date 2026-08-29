@@ -2,15 +2,11 @@ package dev.foundry.worldgen;
 
 import com.tom.createores.recipe.VeinRecipe;
 import dev.foundry.Foundry;
-import net.minecraft.core.Holder;
-import net.minecraft.core.QuartPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.tags.BiomeTags;
-import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator;
@@ -40,11 +36,12 @@ import java.util.concurrent.CompletableFuture;
  * it buys us information:
  *
  *  1. StrategicMacroMask + COE placement cheaply screen a large deterministic seed range.
- *  2. A sparse 7x7 real-Tectonic preview estimates jungle share and relief for the best geometry.
+ *  2. A sparse 7x7 real-Tectonic preview estimates physical relief for the best geometry.
  *  3. Only the two best previews pay for StarterSeedSearch's full 16-block terrain/biome raster.
  *
- * A reported winner therefore still passes the same high-resolution final checks; the sparse pass
- * only decides which candidates are worth spending that expensive verification on.
+ * Biome mix is still measured and reported by the final validator, but it is not a selection or
+ * acceptance requirement. A reported winner therefore passes the high-resolution geography,
+ * flatness and coal checks without being biased toward jungle.
  */
 @Mod.EventBusSubscriber(modid = Foundry.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class StarterSeedCli {
@@ -60,7 +57,6 @@ public final class StarterSeedCli {
     // Sparse physical preview: 7x7 = 49 real height probes per candidate instead of 6,561.
     private static final int PREVIEW_RADIUS = 192;
     private static final int PREVIEW_STEP = 64;
-    private static final double PREVIEW_MIN_JUNGLE_SHARE = 0.30;
     private static final double PREVIEW_MAX_HEIGHT_STD_DEV = 18.0;
     private static final int PREVIEW_MIN_LAND_SAMPLES = 5;
 
@@ -69,9 +65,7 @@ public final class StarterSeedCli {
     private static final int MAX_ISLAND_SPAN = 420;
     private static final int MIN_NEIGHBOR_GAP = 180;
     private static final int MAX_NEIGHBOR_GAP = 450;
-    private static final double MIN_JUNGLE_SHARE = 0.60;
     private static final double MAX_HEIGHT_STD_DEV = 10.0;
-    private static final double TARGET_JUNGLE_SHARE = 0.70;
 
     private StarterSeedCli() {
     }
@@ -87,12 +81,11 @@ public final class StarterSeedCli {
         System.out.println("[Foundry] Optimized pipeline: 20k cheap seeds -> 24 sparse previews -> 2 exact finalists.");
         System.out.println(String.format(
                 Locale.ROOT,
-                "[Foundry] FINAL GATES: island %d-%d blocks | neighbor %d-%d | jungle >= %.0f%% | height SD <= %.1f | coal ON ISLAND",
+                "[Foundry] FINAL GATES: island %d-%d blocks | neighbor %d-%d | height SD <= %.1f | coal ON ISLAND | biome unrestricted",
                 MIN_ISLAND_SPAN,
                 MAX_ISLAND_SPAN,
                 MIN_NEIGHBOR_GAP,
                 MAX_NEIGHBOR_GAP,
-                MIN_JUNGLE_SHARE * 100.0,
                 MAX_HEIGHT_STD_DEV
         ));
         System.out.println("[Foundry] Winner will be saved to run-seed-search/starter-seed-result.txt");
@@ -172,7 +165,6 @@ public final class StarterSeedCli {
                     PreviewCandidate preview = sparsePreview(
                             level,
                             generator,
-                            biomeSource,
                             randomState,
                             seed,
                             coarseScore
@@ -247,13 +239,13 @@ public final class StarterSeedCli {
 
     /**
      * Very cheap real-world preview used only to rank strategic-mask survivors. It intentionally
-     * uses loose gates so a potentially good candidate is not rejected because of the 64-block
-     * sampling grid. The final 16-block raster remains authoritative.
+     * uses loose terrain gates so a potentially good candidate is not rejected because of the
+     * 64-block sampling grid. Biome is deliberately ignored here. The final 16-block raster
+     * remains authoritative for geography, relief, coal location, and biome reporting.
      */
     private static PreviewCandidate sparsePreview(
             ServerLevel level,
             NoiseBasedChunkGenerator generator,
-            BiomeSource biomeSource,
             RandomState randomState,
             long seed,
             double coarseScore
@@ -262,7 +254,6 @@ public final class StarterSeedCli {
         double heightSum = 0.0;
         double heightSqSum = 0.0;
         int landSamples = 0;
-        int jungleSamples = 0;
 
         for (int z = -PREVIEW_RADIUS; z <= PREVIEW_RADIUS; z += PREVIEW_STEP) {
             for (int x = -PREVIEW_RADIUS; x <= PREVIEW_RADIUS; x += PREVIEW_STEP) {
@@ -280,16 +271,6 @@ public final class StarterSeedCli {
                 landSamples++;
                 heightSum += height;
                 heightSqSum += (double) height * height;
-
-                Holder<Biome> biome = biomeSource.getNoiseBiome(
-                        QuartPos.fromBlock(x),
-                        QuartPos.fromBlock(height),
-                        QuartPos.fromBlock(z),
-                        randomState.sampler()
-                );
-                if (biome.is(BiomeTags.IS_JUNGLE)) {
-                    jungleSamples++;
-                }
             }
         }
 
@@ -300,18 +281,15 @@ public final class StarterSeedCli {
         double mean = heightSum / landSamples;
         double variance = heightSqSum / landSamples - mean * mean;
         double heightStdDev = Math.sqrt(Math.max(0.0, variance));
-        double jungleShare = (double) jungleSamples / landSamples;
 
-        // These gates are intentionally much looser than the final acceptance contract.
-        if (jungleShare < PREVIEW_MIN_JUNGLE_SHARE || heightStdDev > PREVIEW_MAX_HEIGHT_STD_DEV) {
+        // Loose preview gate: only obvious high-relief candidates are discarded here.
+        if (heightStdDev > PREVIEW_MAX_HEIGHT_STD_DEV) {
             return null;
         }
 
-        double score = coarseScore
-                + Math.max(0.0, TARGET_JUNGLE_SHARE - jungleShare) * 900.0
-                + heightStdDev * 12.0;
+        double score = coarseScore + heightStdDev * 12.0;
 
-        return new PreviewCandidate(seed, score, jungleShare, heightStdDev, landSamples, randomState);
+        return new PreviewCandidate(seed, score, heightStdDev, landSamples, randomState);
     }
 
     private static boolean passesHardGates(Object candidate) throws ReflectiveOperationException {
@@ -319,7 +297,6 @@ public final class StarterSeedCli {
         int height = intAccessor(candidate, "height");
         int span = Math.max(width, height);
         int neighborGap = intAccessor(candidate, "neighborGap");
-        double jungleShare = doubleAccessor(candidate, "jungleShare");
         double heightStdDev = doubleAccessor(candidate, "heightStdDev");
         boolean coalOnIsland = booleanAccessor(candidate, "coalOnIsland");
 
@@ -327,7 +304,6 @@ public final class StarterSeedCli {
                 && span <= MAX_ISLAND_SPAN
                 && neighborGap >= MIN_NEIGHBOR_GAP
                 && neighborGap <= MAX_NEIGHBOR_GAP
-                && jungleShare >= MIN_JUNGLE_SHARE
                 && heightStdDev <= MAX_HEIGHT_STD_DEV
                 && coalOnIsland;
     }
@@ -352,7 +328,7 @@ public final class StarterSeedCli {
                         + "Seed: %d%n%n"
                         + "Island:       %d x %d%n"
                         + "Neighbor gap: %d blocks%n"
-                        + "Jungle:       %.1f%%%n"
+                        + "Jungle:       %.1f%% (informational only)%n"
                         + "Height SD:    %.2f%n"
                         + "Coal:         ON ISLAND at %d, %d%n"
                         + "Seeds tested: %,d%n"
@@ -382,7 +358,7 @@ public final class StarterSeedCli {
     private static String summarize(Object candidate) throws ReflectiveOperationException {
         return String.format(
                 Locale.ROOT,
-                "seed %d | %dx%d | gap %d | jungle %.0f%% | height SD %.1f | coal %s",
+                "seed %d | %dx%d | gap %d | jungle %.0f%% info | height SD %.1f | coal %s",
                 longAccessor(candidate, "seed"),
                 intAccessor(candidate, "width"),
                 intAccessor(candidate, "height"),
@@ -426,7 +402,6 @@ public final class StarterSeedCli {
     private record PreviewCandidate(
             long seed,
             double score,
-            double jungleShare,
             double heightStdDev,
             int landSamples,
             RandomState randomState
